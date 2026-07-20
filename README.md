@@ -1,38 +1,66 @@
+---
+title: AutoML Studio
+emoji: 🤖
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: Free AutoML for binary classification — React + FastAPI
+---
+
 # AutoML Studio for Binary Classification
 
-**Free & open-source** AutoML pipeline. Built with 100% free tools.
+**Free & open-source** · React UI · FastAPI · Hugging Face Spaces
 
-## Public Live App
+## Stack
 
-> **"You do not have access to this app"** = app not deployed yet. See **[DEPLOY.md](DEPLOY.md)**.
+| Layer | Tech |
+|-------|------|
+| UI | React + Vite + Recharts |
+| API | FastAPI |
+| ML | Pandas, Scikit-learn |
+| Hosting | Hugging Face Spaces (Docker) — free & public |
 
-| Platform | Public URL (after you deploy) |
-|----------|-------------------------------|
-| Hugging Face (easiest) | `https://huggingface.co/spaces/Vekri/automl-studio-classification` |
-| Streamlit Cloud | `https://vekri-automl-studio.streamlit.app` |
-| Render.com | `https://automl-studio-classification.onrender.com` |
-
-**[Full deploy guide → DEPLOY.md](DEPLOY.md)**
-
-## Quick Start (Local)
-
-Double-click **`START.bat`** or:
+## Quick start (local)
 
 ```bash
-pip install -r requirements.txt
-python -m streamlit run streamlit_app.py
+# Terminal 1 — API
+pip install -r backend/requirements.txt
+uvicorn backend.main:app --reload --port 7860
+
+# Terminal 2 — React
+cd frontend
+npm install
+npm run dev
 ```
 
-Open **http://localhost:8501** → **Try Sample Data (Banking)**
+Open **http://localhost:5173**
 
-## Features
+Or double-click **`START_DEV.bat`** (dev) / **`START.bat`** (built UI on :7860).
 
-- CSV upload + business domain flags (Banking, Retail, Healthcare, etc.)
-- Target selection, keep/drop columns
-- Data cleaning recommendations
-- Visualizations, binning, feature selection
-- Validation & export for Predictions Studio
+## Deploy free on Hugging Face
+
+1. Create a Space with **Docker** SDK: [huggingface.co/new-space](https://huggingface.co/new-space)
+2. Connect GitHub repo `Vekri/AutoML-Studio-for-classification`
+3. Public app: `https://huggingface.co/spaces/<you>/automl-studio-classification`
+
+Anyone can open the link — no login required for visitors.
+
+See **[DEPLOY.md](DEPLOY.md)** for step-by-step.
+
+## Workflow
+
+1. Upload CSV / sample data + business domain  
+2. Target & keep/drop columns  
+3. Cleaning recommendations  
+4. Visualizations  
+5. Binning + WoE/IV  
+6. Feature selection  
+7. Validation  
+8. Export ZIP for Predictions Studio  
 
 ## License
 
-MIT — free for anyone to use.
+MIT

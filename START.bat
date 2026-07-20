@@ -1,15 +1,16 @@
 @echo off
-title AutoML Studio
-echo ========================================
-echo   AutoML Studio - Binary Classification
-echo   Free and Open Source
-echo ========================================
+title AutoML Studio (React + API)
+echo Starting AutoML Studio...
 echo.
-echo Installing dependencies...
-python -m pip install -r requirements.txt -q
+echo [1/2] Building frontend if needed...
+cd /d "%~dp0frontend"
+if not exist "dist\index.html" (
+  call npm install
+  call npm run build
+)
+cd /d "%~dp0"
 echo.
-echo Starting app at http://localhost:8501
-echo Press Ctrl+C to stop
-echo.
-start http://localhost:8501
-python -m streamlit run streamlit_app.py
+echo [2/2] Starting API + UI on http://localhost:7860
+python -m pip install -r backend\requirements.txt -q
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 7860
+pause
