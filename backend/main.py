@@ -23,7 +23,9 @@ from modules.cleaning import apply_cleaning, auto_clean, generate_cleaning_recom
 from modules.data_loader import (  # noqa: E402
     apply_column_selection,
     detect_binary_target,
+    get_categorical_columns,
     get_column_summary,
+    get_numeric_columns,
     suggest_target_column,
 )
 from modules.export import build_studio_manifest, export_zip_bundle  # noqa: E402
@@ -33,7 +35,6 @@ from modules.feature_selection import (  # noqa: E402
     run_feature_selection,
 )
 from modules.validation import run_model_validation, validate_dataset  # noqa: E402
-from modules.visualization import get_categorical_columns, get_numeric_columns  # noqa: E402
 
 from backend.session_store import create_session, delete_session, get_session  # noqa: E402
 

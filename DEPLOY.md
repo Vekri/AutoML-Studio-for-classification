@@ -1,117 +1,102 @@
-# Deploy AutoML Studio — FREE public servers
+# Free deploy that WORKS — Render (Python, no Docker)
 
-The Hugging Face 404 means that Space was never created. Use one of these **other free hosts** instead.
+Docker builds often fail / OOM on free tiers. This app now deploys as **native Python** with a **prebuilt React UI** in `frontend/dist`.
 
 ---
 
-## Option 1 — Render.com (Recommended · Free)
+## Deploy on Render (do this)
 
-### Steps
+### 1. Open Render
+**[https://dashboard.render.com](https://dashboard.render.com)** → Sign in with GitHub
 
-1. Open **[dashboard.render.com](https://dashboard.render.com)**
-2. Sign up with **GitHub** (account that owns `Vekri`)
-3. Click **New +** → **Blueprint**
-4. Select repo: **`Vekri/AutoML-Studio-for-classification`**
-5. Click **Apply**
-6. Wait 5–10 minutes for Docker build
+### 2. Create Web Service (manual — most reliable)
 
-### Your public URL
+1. Click **New +** → **Web Service**
+2. Connect repo: **`Vekri/AutoML-Studio-for-classification`**
+3. Fill in:
+
+| Setting | Value |
+|---------|-------|
+| Name | `automl-studio-classification` |
+| Region | Oregon |
+| Runtime | **Python 3** |
+| Branch | `main` |
+| Build Command | `pip install -r backend/requirements.txt` |
+| Start Command | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
+| Instance type | **Free** |
+
+4. Environment → Add:
+
+| Key | Value |
+|-----|-------|
+| `PYTHON_VERSION` | `3.11.0` |
+
+5. Click **Deploy Web Service**
+
+### 3. Wait for build (green “Live”)
+
+First deploy: 3–8 minutes.
+
+### 4. Open your URL
+
+Render shows a URL like:
 
 ```
 https://automl-studio-classification.onrender.com
 ```
 
-Anyone can open it — free, no login for visitors.
+Test API:
 
-### If Blueprint fails — create Web Service manually
+```
+https://automl-studio-classification.onrender.com/api/health
+```
 
-1. **New +** → **Web Service**
-2. Connect the same GitHub repo
-3. Settings:
+Should return: `{"status":"ok",...}`
 
-| Field | Value |
-|-------|-------|
-| Runtime | **Docker** |
-| Branch | `main` |
-| Region | Oregon (or closest) |
-| Instance type | **Free** |
-| Health check path | `/api/health` |
-
-4. Click **Deploy**
-
-### First load note
-
-Free Render sleeps after ~15 min idle. First open may take 30–60 seconds — wait, then refresh.
+Then open the root URL for the React app.
 
 ---
 
-## Option 2 — Railway.app (Free trial / hobby)
+## OR use Blueprint
 
-1. Open **[railway.app](https://railway.app)** → Login with GitHub
-2. **New Project** → **Deploy from GitHub repo**
-3. Choose `Vekri/AutoML-Studio-for-classification`
-4. Railway detects `Dockerfile` automatically
-5. Generate a public domain: **Settings** → **Networking** → **Generate Domain**
-
-URL looks like: `https://automl-studio-classification-production.up.railway.app`
+**New +** → **Blueprint** → select this repo → **Apply**  
+(`render.yaml` is already set for Python free tier.)
 
 ---
 
-## Option 3 — Fly.io (Free allowance)
+## Important free-tier notes
 
-Install [flyctl](https://fly.io/docs/hands-on/install-flyctl/), then:
+- App **sleeps after ~15 min** idle  
+- First open after sleep: wait **30–60 seconds**, then refresh  
+- If build fails, open **Logs** and paste the error here  
 
+---
+
+## Alternative free hosts
+
+### Railway
+1. [railway.app](https://railway.app) → New Project → Deploy from GitHub  
+2. Use **Dockerfile** or set start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`  
+3. Generate domain under Settings → Networking  
+
+### Local (always works)
 ```bash
-fly auth login
-fly launch --name automl-studio-classification --no-deploy
-fly deploy
-```
-
-App URL: `https://automl-studio-classification.fly.dev`
-
----
-
-## Verify deploy worked
-
-Open:
-
-```
-https://YOUR-URL/api/health
-```
-
-Expected:
-
-```json
-{"status":"ok","app":"AutoML Studio","version":"2.0.0"}
-```
-
-Then open the root URL — React AutoML Studio UI.
-
----
-
-## Local (always works)
-
-```bash
-# Dev UI
-START_DEV.bat
-
-# Or single server
-cd frontend && npm run build && cd ..
+pip install -r backend/requirements.txt
 uvicorn backend.main:app --host 0.0.0.0 --port 7860
 ```
+Open http://localhost:7860
 
-- UI (dev): http://localhost:5173  
-- Built: http://localhost:7860  
+Or `START_DEV.bat` for hot reload on http://localhost:5173
 
 ---
 
-## Which should you pick?
+## If you still see errors
 
-| Host | Best for | Catch |
-|------|----------|--------|
-| **Render** | Easiest free public URL | Sleeps when idle |
-| **Railway** | Fast deploys | Free credits limited |
-| **Fly.io** | Always-on feel | Needs CLI |
-| Hugging Face | ML demos | Space must be created first |
+Paste **exact** text from Render **Logs** (build or runtime). Common fixes:
 
-**Start with Render** — it's the simplest free public option for this app.
+| Error | Fix |
+|-------|-----|
+| ModuleNotFoundError | Build command must use `backend/requirements.txt` |
+| Port bind failed | Start command must use `$PORT` |
+| Application failed to respond | Wait for cold start, hit `/api/health` |
+| Out of memory | Free tier is 512MB — use sample data, not huge CSVs |

@@ -95,3 +95,13 @@ def suggest_target_column(df: pd.DataFrame, domain_targets: list[str]) -> str | 
         if col.lower() in ("target", "label", "class", "y", "outcome"):
             return col
     return None
+
+
+def get_numeric_columns(df: pd.DataFrame, exclude: list[str] | None = None) -> list[str]:
+    exclude = exclude or []
+    return [c for c in df.select_dtypes(include=["number"]).columns if c not in exclude]
+
+
+def get_categorical_columns(df: pd.DataFrame, exclude: list[str] | None = None) -> list[str]:
+    exclude = exclude or []
+    return [c for c in df.select_dtypes(exclude=["number"]).columns if c not in exclude]

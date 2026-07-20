@@ -1,4 +1,4 @@
-# Hugging Face Spaces — Docker (React + FastAPI)
+# Hugging Face / Docker / any cloud — React + FastAPI
 FROM node:20-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json ./
@@ -24,11 +24,9 @@ COPY config.py /app/config.py
 COPY modules /app/modules
 COPY sample_data /app/sample_data
 COPY backend /app/backend
-COPY start.sh /app/start.sh
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 EXPOSE 7860
 
-RUN chmod +x /app/start.sh
-
-CMD ["/app/start.sh"]
+# Direct command — avoids Windows CRLF issues with shell scripts
+CMD ["sh", "-c", "python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
