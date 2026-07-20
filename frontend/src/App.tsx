@@ -304,34 +304,57 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <h1>AutoML Studio</h1>
-          <p>Binary classification · React + Hugging Face</p>
+          <div className="brand-mark">AS</div>
+          <div>
+            <h1>AutoML Studio</h1>
+            <p>Binary classification pipeline</p>
+          </div>
         </div>
+
+        <div className="progress-mini">
+          <div className="label">
+            <span>Progress</span>
+            <span>{Math.round((step / 8) * 100)}%</span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${(step / 8) * 100}%` }} />
+          </div>
+        </div>
+
         <div className="step-list">
           {STEPS.map((s) => (
             <button
               key={s.id}
-              className={`step-btn ${step === s.id ? "active" : ""}`}
+              className={`step-btn ${step === s.id ? "active" : ""} ${s.id < step ? "done" : ""}`}
               onClick={() => setStep(s.id)}
             >
-              {s.id}. {s.title}
-              <small>{s.blurb}</small>
+              <span className="step-num">{s.id < step ? "✓" : s.id}</span>
+              <span>
+                <strong>{s.title}</strong>
+                <small>{s.blurb}</small>
+              </span>
             </button>
           ))}
         </div>
+
         <div className="sidebar-meta">
           {session ? (
             <>
               <div>
-                <strong style={{ color: "#fff" }}>{session.filename}</strong>
+                <strong>{session.filename}</strong>
                 <div>
                   {session.rows.toLocaleString()} rows · {session.columns.length} cols
                 </div>
               </div>
-              {session.target && <div>Target: {session.target}</div>}
+              {session.target && (
+                <div>
+                  Target: <strong>{session.target}</strong>
+                </div>
+              )}
+              <div>Domain: {session.domain}</div>
             </>
           ) : (
-            <div>No dataset loaded</div>
+            <div>No dataset loaded yet</div>
           )}
           <button className="ghost" onClick={resetAll}>
             Reset session
@@ -339,21 +362,34 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="main">
-        <div className="hero">
+      <main className="main" key={step}>
+        <div className="topbar">
           <div>
             <h2>{STEPS[step - 1].title}</h2>
-            <p>Free open-source AutoML pipeline for business binary classification problems.</p>
+            <p>
+              {step === 1 && "Load business data and pick the industry problem domain."}
+              {step === 2 && "Choose the binary target and keep or drop predictor columns."}
+              {step === 3 && "Review cleaning suggestions and apply safe fixes."}
+              {step === 4 && "Explore distributions, missingness, and correlations."}
+              {step === 5 && "Bin numeric features and inspect WoE / Information Value."}
+              {step === 6 && "Rank features and select the strongest predictors."}
+              {step === 7 && "Run data-quality checks and quick baseline models."}
+              {step === 8 && "Download the package for Predictions Studio."}
+            </p>
           </div>
-          <div className="muted mono">Step {step} / 8</div>
+          <div className="step-chip">
+            Step <em>{step}</em> of 8
+          </div>
         </div>
 
         {error && <div className="error">{error}</div>}
         {message && <div className="success">{message}</div>}
+        {busy && <div className="success">Working…</div>}
 
         {step === 1 && (
           <div className="panel grid-2">
             <div>
+              <p className="panel-title">Data source</p>
               <div className="field">
                 <label>Business domain</label>
                 <select
@@ -375,14 +411,15 @@ export default function App() {
                 </select>
               </div>
               {domainInfo && (
-                <p className="muted">
+                <p className="muted" style={{ marginTop: "-0.35rem", marginBottom: "1rem" }}>
                   {domainInfo.description}
                   <br />
                   Common targets: {domainInfo.common_targets.join(", ")}
                 </p>
               )}
-              <div className="field">
-                <label>Upload CSV</label>
+              <div className="dropzone">
+                <strong>Upload CSV</strong>
+                <p>Banking, retail, healthcare, or any binary classification dataset</p>
                 <input
                   type="file"
                   accept=".csv"
@@ -396,9 +433,10 @@ export default function App() {
               </div>
             </div>
             <div>
+              <p className="panel-title">Dataset overview</p>
               {session ? (
-                <>
-                  <div className="grid-4" style={{ marginBottom: "1rem" }}>
+                <div className="split-stack">
+                  <div className="grid-2">
                     <div className="metric">
                       <div className="label">Rows</div>
                       <div className="value">{session.rows}</div>
@@ -417,9 +455,12 @@ export default function App() {
                     </div>
                   </div>
                   <PreviewTable rows={session.preview} />
-                </>
+                </div>
               ) : (
-                <p className="muted">Upload a CSV or load sample data to begin.</p>
+                <div className="empty-state">
+                  <strong>No data yet</strong>
+                  Upload a CSV or load the banking sample to begin the pipeline.
+                </div>
               )}
             </div>
           </div>
@@ -460,7 +501,7 @@ export default function App() {
                       <XAxis dataKey="class" />
                       <YAxis />
                       <Tooltip />
-                      <Bar dataKey="count" fill="#0f6e56" />
+                      <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -553,7 +594,7 @@ export default function App() {
                     <XAxis dataKey="class" />
                     <YAxis />
                     <Tooltip />
-                    <Bar dataKey="count" fill="#0f6e56" />
+                    <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -567,7 +608,7 @@ export default function App() {
                       <XAxis type="number" />
                       <YAxis type="category" dataKey="column" width={80} />
                       <Tooltip />
-                      <Bar dataKey="missing_count" fill="#c45c26" />
+                      <Bar dataKey="missing_count" fill="#ea580c" radius={[0, 6, 6, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
@@ -595,7 +636,7 @@ export default function App() {
                       <YAxis />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="count" fill="#1a2332" />
+                      <Bar dataKey="count" fill="#0f172a" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -609,7 +650,7 @@ export default function App() {
                     <XAxis type="number" domain={[-1, 1]} />
                     <YAxis type="category" dataKey="feature" width={100} />
                     <Tooltip />
-                    <Bar dataKey="correlation" fill="#0f6e56" />
+                    <Bar dataKey="correlation" fill="#0d9488" radius={[0, 6, 6, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -727,7 +768,7 @@ export default function App() {
                     <XAxis type="number" />
                     <YAxis type="category" dataKey="feature" width={110} />
                     <Tooltip />
-                    <Bar dataKey={scoreKey} fill="#0f6e56" />
+                    <Bar dataKey={scoreKey} fill="#0d9488" radius={[0, 6, 6, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -884,10 +925,15 @@ export default function App() {
 
         {!session && step > 1 && (
           <div className="panel">
-            <p className="muted">Load data in Step 1 first.</p>
-            <button className="primary" onClick={() => setStep(1)}>
-              Go to Upload
-            </button>
+            <div className="empty-state">
+              <strong>Load data first</strong>
+              Go back to Upload & Domain to start the pipeline.
+            </div>
+            <div className="btn-row" style={{ justifyContent: "center" }}>
+              <button className="primary" onClick={() => setStep(1)}>
+                Go to Upload
+              </button>
+            </div>
           </div>
         )}
 
