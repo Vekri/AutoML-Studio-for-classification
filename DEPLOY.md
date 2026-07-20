@@ -55,7 +55,22 @@ Click this to pre-fill the deploy form:
 
 ---
 
-## If deploy fails
+## Option B: Render.com (Free — Often Easier)
+
+If Streamlit Cloud gives access errors, use Render instead:
+
+1. Go to **[dashboard.render.com](https://dashboard.render.com)** → sign up free with GitHub
+2. Click **New +** → **Blueprint**
+3. Connect repo: `Vekri/AutoML-Studio-for-classification`
+4. Render reads `render.yaml` automatically → click **Apply**
+5. Wait ~5 minutes — you get a public URL like:
+   `https://automl-studio-classification.onrender.com`
+
+Anyone can access it — completely free.
+
+---
+
+## Option C: Run on Your PC (Instant)
 
 Check the **Logs** tab in Streamlit Cloud. Common fixes:
 
@@ -65,11 +80,13 @@ Check the **Logs** tab in Streamlit Cloud. Common fixes:
 
 ---
 
-## Alternative: Run locally (always works)
+## Option C: Run on Your PC (Instant)
+
+Double-click **`START.bat`** in the project folder.
+
+Or run manually:
 
 ```bash
-git clone https://github.com/Vekri/AutoML-Studio-for-classification.git
-cd AutoML-Studio-for-classification
 pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
@@ -78,7 +95,7 @@ Open **http://localhost:8501** → click **Try Sample Data (Banking)**
 
 ---
 
-## Alternative: Hugging Face Spaces (also free)
+## If Streamlit deploy fails
 
 1. Go to **[huggingface.co/new-space](https://huggingface.co/new-space)**
 2. Space name: `automl-studio-classification`
