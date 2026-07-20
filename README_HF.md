@@ -12,17 +12,17 @@ license: mit
 
 # AutoML Studio for Binary Classification
 
-Free, open-source AutoML pipeline. Upload CSV, clean data, visualize, bin features, select variables, validate, and export.
+Free open-source AutoML pipeline. Upload CSV, clean data, visualize, bin features, select variables, validate, and export.
+
+**Try Sample Data (Banking)** button available — no upload needed.
 
 ## Features
 
-- CSV upload with business domain flags (Banking, Retail, Healthcare, etc.)
+- Business domains: Banking, Retail, Healthcare, Insurance, Telecom, Marketing, HR, Manufacturing
 - Target selection, keep/drop columns
 - Data cleaning recommendations
-- Distributions & visualizations
-- Binning with WoE/IV
-- Feature selection (6 methods)
-- Validation & export for Predictions Studio
+- Visualizations, binning, feature selection, validation
+- Export ZIP for Predictions Studio
 
 ## Run locally
 

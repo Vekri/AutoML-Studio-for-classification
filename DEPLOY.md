@@ -1,106 +1,92 @@
-# Deploy AutoML Studio for FREE (public access for anyone)
+# DEPLOY — Make AutoML Studio Public (Free)
 
-The error **"You do not have access to this app"** means the app was **never deployed** under your account, or you're opening an old/wrong URL.
+## Why you see "You do not have access to this app"
 
-Follow these steps exactly.
+This error means **the URL you opened does not exist yet** OR **belongs to someone else**.
 
----
-
-## Step 1 — Fix Streamlit ↔ GitHub connection
-
-1. Open **[share.streamlit.io](https://share.streamlit.io)**
-2. Sign in with **vekris363@gmail.com**
-3. Click your **profile (top right)** → **Settings**
-4. Under **Linked accounts**, confirm **GitHub** shows **`Vekri`**
-   - If it shows a different GitHub account → **Disconnect** and reconnect the correct one
-   - The GitHub user **`Vekri`** must own the repo
+You must **create and deploy** the app first. Opening a random `.streamlit.app` link will always fail until YOU deploy it.
 
 ---
 
-## Step 2 — Deploy a NEW app (do not open old URLs)
+# EASIEST: Hugging Face Spaces (Recommended)
 
-1. Go to **[share.streamlit.io](https://share.streamlit.io)**
-2. Click **Create app** (or **New app**)
-3. Fill in exactly:
+Public URL anyone can use — no access errors.
 
-| Field | Value |
-|-------|-------|
-| Repository | `Vekri/AutoML-Studio-for-classification` |
-| Branch | `main` |
-| Main file path | `streamlit_app.py` |
-| App URL (optional) | `automl-studio-classification` |
+### Step 1 — Create Hugging Face account (free)
+Go to **[huggingface.co/join](https://huggingface.co/join)** → sign up (free)
 
-4. Click **Deploy**
-5. Wait 2–3 minutes for the build to finish
+### Step 2 — Create a Space
+1. Go to **[huggingface.co/new-space](https://huggingface.co/new-space)**
+2. Fill in:
+   - **Space name:** `automl-studio-classification`
+   - **License:** MIT
+   - **SDK:** Streamlit
+   - **Hardware:** CPU basic (free)
+3. Click **Create Space**
 
----
+### Step 3 — Connect GitHub repo
+1. On your Space page → **Settings** → **Repository**
+2. Link to: `Vekri/AutoML-Studio-for-classification`
+3. Set **App file** to: `streamlit_app.py`
+4. Space rebuilds automatically
 
-## Step 3 — Your public URL
-
-After deploy succeeds, your live app will be at:
-
-**https://automl-studio-classification.streamlit.app**
-
-(or whatever App URL you chose)
-
-Share this link — **anyone can use it for free**, no login required.
-
----
-
-## One-click deploy link
-
-Click this to pre-fill the deploy form:
-
-**[Deploy to Streamlit Cloud](https://share.streamlit.io/deploy?repository=Vekri/AutoML-Studio-for-classification&branch=main&mainModule=streamlit_app.py)**
+### Step 4 — Your public URL
+```
+https://huggingface.co/spaces/Vekri/automl-studio-classification
+```
+Share this link — **anyone can use it free, no login required**.
 
 ---
 
-## Option B: Render.com (Free — Often Easier)
+# OPTION 2: Streamlit Cloud
 
-If Streamlit Cloud gives access errors, use Render instead:
+### Important: use a UNIQUE app name
+Do NOT use generic names — they may be taken by others.
+Use: **`vekri-automl-studio`** or **`automl-vekri-2026`**
 
-1. Go to **[dashboard.render.com](https://dashboard.render.com)** → sign up free with GitHub
-2. Click **New +** → **Blueprint**
-3. Connect repo: `Vekri/AutoML-Studio-for-classification`
-4. Render reads `render.yaml` automatically → click **Apply**
-5. Wait ~5 minutes — you get a public URL like:
-   `https://automl-studio-classification.onrender.com`
+### Steps
+1. Open: **[share.streamlit.io](https://share.streamlit.io)** → sign in with GitHub **Vekri**
+2. Click **Create app**
+3. Set:
+   - Repository: `Vekri/AutoML-Studio-for-classification`
+   - Branch: `main`
+   - Main file: `streamlit_app.py`
+   - App URL: `vekri-automl-studio`
+4. Click **Deploy** → wait 3 minutes
+5. Your URL: **https://vekri-automl-studio.streamlit.app**
 
-Anyone can access it — completely free.
-
----
-
-## Option C: Run on Your PC (Instant)
-
-Check the **Logs** tab in Streamlit Cloud. Common fixes:
-
-- **Main file** must be `streamlit_app.py` (not `app.py`)
-- **Repo must be public** — it is: [github.com/Vekri/AutoML-Studio-for-classification](https://github.com/Vekri/AutoML-Studio-for-classification)
-- **GitHub access** — grant Streamlit access to the `Vekri` org/account when prompted
+Only open the URL **after** deploy shows Running in your dashboard.
 
 ---
 
-## Option C: Run on Your PC (Instant)
+# OPTION 3: Render.com (Free)
 
-Double-click **`START.bat`** in the project folder.
+1. **[dashboard.render.com](https://dashboard.render.com)** → sign up with GitHub
+2. **New +** → **Blueprint**
+3. Connect `Vekri/AutoML-Studio-for-classification`
+4. Click **Apply**
+5. URL: `https://automl-studio-classification.onrender.com`
 
-Or run manually:
+---
 
+# OPTION 4: Run on Your PC (Instant)
+
+Double-click **`START.bat`**
+
+Or:
 ```bash
 pip install -r requirements.txt
-streamlit run streamlit_app.py
+python -m streamlit run streamlit_app.py
 ```
-
-Open **http://localhost:8501** → click **Try Sample Data (Banking)**
+Open **http://localhost:8501**
 
 ---
 
-## If Streamlit deploy fails
+# Auto-deploy with GitHub Actions (Hugging Face)
 
-1. Go to **[huggingface.co/new-space](https://huggingface.co/new-space)**
-2. Space name: `automl-studio-classification`
-3. SDK: **Streamlit**
-4. Create Space, then upload this repo or connect GitHub
-5. Set app file to `streamlit_app.py`
-
-Public URL: `https://huggingface.co/spaces/YOUR_USERNAME/automl-studio-classification`
+1. Create HF account + Space (above)
+2. Get token: **[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)** → New token (Write)
+3. GitHub repo → **Settings** → **Secrets** → **Actions** → New secret:
+   - Name: `HF_TOKEN`
+   - Value: your HF token
+4. Push any change to `main` — auto-deploys to your Space
