@@ -36,7 +36,12 @@ from modules.feature_selection import (  # noqa: E402
 )
 from modules.validation import run_model_validation, validate_dataset  # noqa: E402
 from modules.balancing import list_balance_methods  # noqa: E402
-from modules.modeling import list_models, run_model_suite  # noqa: E402
+from modules.modeling import (  # noqa: E402
+    find_combination,
+    list_models,
+    run_model_suite,
+    select_best_from_leaderboard,
+)
 
 from backend.session_store import create_session, delete_session, get_session  # noqa: E402
 
@@ -90,6 +95,18 @@ class ValidationRequest(BaseModel):
     )
     balance_methods: list[str] = Field(default_factory=lambda: ["none", "class_weight", "smote"])
     run_all_combinations: bool = True
+    selection_metric: str = "auc_roc"
+    auto_select_best: bool = True
+
+
+class SelectAlgorithmRequest(BaseModel):
+    model_id: str
+    balance_method: str
+    selection_metric: str = "manual"
+
+
+class AutoSelectRequest(BaseModel):
+    selection_metric: str = "auc_roc"
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +146,7 @@ def _session_payload(session) -> dict[str, Any]:
         "selected_features": session.selected_features,
         "has_cleaning": bool(session.cleaning_config),
         "has_binning": bool(session.binning_config),
+        "selected_algorithm": session.selected_algorithm or None,
     }
 
 
@@ -526,8 +544,58 @@ def validate_models(session_id: str, body: ValidationRequest):
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    session.model_validation = _json_safe(result)
-    return {"result": session.model_validation}
+
+    result = _json_safe(result)
+    session.model_validation = result
+
+    selected = None
+    if body.auto_select_best:
+        selected = select_best_from_leaderboard(result, metric=body.selection_metric)
+        if selected:
+            selected["selected_by"] = "auto"
+            session.selected_algorithm = selected
+            result["selected_algorithm"] = selected
+            result["best"] = {
+                **(result.get("best") or {}),
+                "selection_metric": body.selection_metric,
+            }
+
+    return {
+        "result": result,
+        "selected_algorithm": session.selected_algorithm or None,
+    }
+
+
+@app.post("/api/session/{session_id}/select-algorithm")
+def select_algorithm(session_id: str, body: SelectAlgorithmRequest):
+    session = _require_session(session_id)
+    if not session.model_validation:
+        raise HTTPException(status_code=400, detail="Run model comparison first")
+    found = find_combination(session.model_validation, body.model_id, body.balance_method)
+    if not found:
+        raise HTTPException(status_code=404, detail="Combination not found in last run")
+    found["selected_by"] = "manual"
+    found["selection_metric"] = body.selection_metric
+    session.selected_algorithm = _json_safe(found)
+    return {"selected_algorithm": session.selected_algorithm}
+
+
+@app.post("/api/session/{session_id}/select-algorithm/auto")
+def auto_select_algorithm(session_id: str, body: AutoSelectRequest):
+    session = _require_session(session_id)
+    if not session.model_validation:
+        raise HTTPException(status_code=400, detail="Run model comparison first")
+    selected = select_best_from_leaderboard(session.model_validation, metric=body.selection_metric)
+    if not selected:
+        raise HTTPException(status_code=400, detail="No successful model runs to select from")
+    session.selected_algorithm = _json_safe(selected)
+    return {"selected_algorithm": session.selected_algorithm}
+
+
+@app.get("/api/session/{session_id}/selected-algorithm")
+def get_selected_algorithm(session_id: str):
+    session = _require_session(session_id)
+    return {"selected_algorithm": session.selected_algorithm or None}
 
 
 # ---------------------------------------------------------------------------
@@ -557,6 +625,8 @@ def export_zip(session_id: str):
             "selected_features": features,
             "result": session.feature_selection_result,
         },
+        selected_algorithm=session.selected_algorithm,
+        model_validation=session.model_validation,
     )
     data = export_zip_bundle(
         df=df,
@@ -596,6 +666,8 @@ def export_manifest(session_id: str):
             "selected_features": features,
             "result": session.feature_selection_result,
         },
+        selected_algorithm=session.selected_algorithm,
+        model_validation=session.model_validation,
     )
     return _json_safe(manifest)
 

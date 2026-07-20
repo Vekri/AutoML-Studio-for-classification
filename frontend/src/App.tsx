@@ -107,6 +107,8 @@ export default function App() {
     "gradient_boosting",
   ]);
   const [runAllCombos, setRunAllCombos] = useState(true);
+  const [selectionMetric, setSelectionMetric] = useState("auc_roc");
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<Record<string, unknown> | null>(null);
 
   // Step 8
   const [manifest, setManifest] = useState<Record<string, unknown> | null>(null);
@@ -310,10 +312,40 @@ export default function App() {
           models: selectedModels,
           balance_methods: selectedBalances,
           run_all_combinations: runAllCombos,
+          selection_metric: selectionMetric,
+          auto_select_best: true,
         }),
-      "Model suite complete"
+      "Model suite complete — best algorithm selected"
     );
-    if (data) setModelResult(data.result);
+    if (data) {
+      setModelResult(data.result);
+      if (data.selected_algorithm) setSelectedAlgorithm(data.selected_algorithm);
+      else if (data.result.selected_algorithm)
+        setSelectedAlgorithm(data.result.selected_algorithm as Record<string, unknown>);
+    }
+  }
+
+  async function pickBestAlgorithm() {
+    if (!session) return;
+    const data = await run(
+      () => api.autoSelectAlgorithm(session.session_id, selectionMetric),
+      "Best algorithm selected"
+    );
+    if (data) setSelectedAlgorithm(data.selected_algorithm);
+  }
+
+  async function pickAlgorithm(modelId: string, balanceMethod: string) {
+    if (!session) return;
+    const data = await run(
+      () =>
+        api.selectAlgorithm(session.session_id, {
+          model_id: modelId,
+          balance_method: balanceMethod,
+          selection_metric: selectionMetric,
+        }),
+      "Algorithm selected"
+    );
+    if (data) setSelectedAlgorithm(data.selected_algorithm);
   }
 
   async function loadManifest() {
@@ -337,6 +369,7 @@ export default function App() {
     setRfResult([]);
     setDataReport(null);
     setModelResult(null);
+    setSelectedAlgorithm(null);
     setManifest(null);
     setMessage(null);
     setError(null);
@@ -964,6 +997,18 @@ export default function App() {
               </div>
             </div>
 
+            <div className="field" style={{ marginTop: "0.5rem" }}>
+              <label>Best-algorithm metric</label>
+              <select value={selectionMetric} onChange={(e) => setSelectionMetric(e.target.value)}>
+                <option value="auc_roc">AUC-ROC (recommended)</option>
+                <option value="f1">F1-Score</option>
+                <option value="accuracy">Accuracy</option>
+                <option value="precision">Precision</option>
+                <option value="recall">Recall</option>
+                <option value="cv_auc_mean">CV AUC mean</option>
+              </select>
+            </div>
+
             <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
               <input
                 type="checkbox"
@@ -975,7 +1020,7 @@ export default function App() {
 
             <div className="btn-row">
               <button className="primary" disabled={busy} onClick={runModelValidation}>
-                Train & compare models
+                Train, compare & select best
               </button>
               <span className="muted">
                 {selectedBalances.length} balancing × {selectedModels.length} models ={" "}
@@ -983,40 +1028,82 @@ export default function App() {
               </span>
             </div>
 
+            {selectedAlgorithm && (
+              <div className="success" style={{ marginTop: "1rem" }}>
+                Selected algorithm:{" "}
+                <strong>
+                  {String(selectedAlgorithm.model_label)} + {String(selectedAlgorithm.balance_label)}
+                </strong>
+                {" · "}
+                metric={String(selectedAlgorithm.selection_metric)} · by={String(selectedAlgorithm.selected_by)}
+                {selectedAlgorithm.metrics ? (
+                  <>
+                    {" · "}AUC {String((selectedAlgorithm.metrics as Record<string, unknown>).auc_roc)} · F1{" "}
+                    {String((selectedAlgorithm.metrics as Record<string, unknown>).f1)}
+                  </>
+                ) : null}
+              </div>
+            )}
+
             {modelResult && (
               <div style={{ marginTop: "1.25rem" }}>
-                {modelResult.best && (
-                  <div className="success">
-                    Best:{" "}
-                    <strong>
-                      {String((modelResult.best as Record<string, unknown>).model_label)} +{" "}
-                      {String((modelResult.best as Record<string, unknown>).balance_label)}
-                    </strong>{" "}
-                    (AUC{" "}
-                    {String(
-                      ((modelResult.best as Record<string, unknown>).metrics as Record<string, unknown>)
-                        ?.auc_roc ?? "N/A"
-                    )}
-                    )
-                  </div>
-                )}
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="secondary" disabled={busy} onClick={pickBestAlgorithm}>
+                    Re-select best by {selectionMetric}
+                  </button>
+                </div>
 
-                <p className="panel-title">Leaderboard</p>
-                <PreviewTable
-                  rows={((modelResult.leaderboard as Record<string, unknown>[]) || []).map((r) => {
-                    const m = (r.metrics as Record<string, unknown>) || {};
-                    return {
-                      rank_model: r.model_label,
-                      balancing: r.balance_label,
-                      auc_roc: m.auc_roc,
-                      f1: m.f1,
-                      accuracy: m.accuracy,
-                      precision: m.precision,
-                      recall: m.recall,
-                      cv_auc: m.cv_auc_mean,
-                    };
-                  })}
-                />
+                <p className="panel-title">Leaderboard — click Select to choose an algorithm</p>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Model</th>
+                        <th>Balancing</th>
+                        <th>AUC</th>
+                        <th>F1</th>
+                        <th>Accuracy</th>
+                        <th>Precision</th>
+                        <th>Recall</th>
+                        <th>CV AUC</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {((modelResult.leaderboard as Record<string, unknown>[]) || []).map((r, i) => {
+                        const m = (r.metrics as Record<string, unknown>) || {};
+                        const isSelected =
+                          selectedAlgorithm &&
+                          selectedAlgorithm.model_id === r.model_id &&
+                          selectedAlgorithm.balance_method === r.balance_method;
+                        return (
+                          <tr key={`${r.model_id}-${r.balance_method}-${i}`} style={isSelected ? { background: "#ecfdf5" } : undefined}>
+                            <td>{i + 1}</td>
+                            <td>{String(r.model_label)}</td>
+                            <td>{String(r.balance_label)}</td>
+                            <td>{String(m.auc_roc ?? "")}</td>
+                            <td>{String(m.f1 ?? "")}</td>
+                            <td>{String(m.accuracy ?? "")}</td>
+                            <td>{String(m.precision ?? "")}</td>
+                            <td>{String(m.recall ?? "")}</td>
+                            <td>{String(m.cv_auc_mean ?? "")}</td>
+                            <td>
+                              <button
+                                className={isSelected ? "primary" : "secondary"}
+                                style={{ padding: "0.35rem 0.7rem", fontSize: "0.78rem" }}
+                                disabled={busy}
+                                onClick={() => pickAlgorithm(String(r.model_id), String(r.balance_method))}
+                              >
+                                {isSelected ? "Selected" : "Select"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
 
                 <p className="panel-title" style={{ marginTop: "1rem" }}>
                   Split info
@@ -1053,6 +1140,18 @@ export default function App() {
                 <div className="value">{session.rows}</div>
               </div>
             </div>
+            {selectedAlgorithm ? (
+              <div className="success" style={{ marginTop: "1rem" }}>
+                Export will use algorithm:{" "}
+                <strong>
+                  {String(selectedAlgorithm.model_label)} + {String(selectedAlgorithm.balance_label)}
+                </strong>
+              </div>
+            ) : (
+              <div className="error" style={{ marginTop: "1rem" }}>
+                No algorithm selected yet — run Step 7 (Balance & Models) to pick the best model.
+              </div>
+            )}
             <div className="btn-row">
               <a className="primary" href={api.exportUrl(session.session_id)} style={{ textDecoration: "none" }}>
                 Download ZIP for Predictions Studio

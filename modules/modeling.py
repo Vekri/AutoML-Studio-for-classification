@@ -275,6 +275,58 @@ def run_model_suite(
     }
 
 
+def select_best_from_leaderboard(
+    result: dict[str, Any],
+    metric: str = "auc_roc",
+) -> dict[str, Any] | None:
+    """Pick best algorithm combo from suite results by metric."""
+    metric = metric if metric in ("auc_roc", "f1", "accuracy", "precision", "recall", "cv_auc_mean") else "auc_roc"
+    board = [r for r in (result.get("leaderboard") or result.get("combinations") or []) if r.get("status") == "ok"]
+    if not board:
+        return None
+
+    def score(row: dict[str, Any]) -> float:
+        m = row.get("metrics") or {}
+        val = m.get(metric)
+        try:
+            return float(val) if val is not None else -1.0
+        except (TypeError, ValueError):
+            return -1.0
+
+    best = max(board, key=score)
+    return {
+        "model_id": best.get("model_id"),
+        "model_label": best.get("model_label"),
+        "balance_method": best.get("balance_method"),
+        "balance_label": best.get("balance_label"),
+        "selection_metric": metric,
+        "metrics": best.get("metrics"),
+        "class_weight_used": best.get("class_weight_used", False),
+        "selected_by": "auto",
+        "rank": 1,
+    }
+
+
+def find_combination(
+    result: dict[str, Any],
+    model_id: str,
+    balance_method: str,
+) -> dict[str, Any] | None:
+    for row in result.get("combinations") or []:
+        if row.get("model_id") == model_id and row.get("balance_method") == balance_method and row.get("status") == "ok":
+            return {
+                "model_id": row.get("model_id"),
+                "model_label": row.get("model_label"),
+                "balance_method": row.get("balance_method"),
+                "balance_label": row.get("balance_label"),
+                "selection_metric": "manual",
+                "metrics": row.get("metrics"),
+                "class_weight_used": row.get("class_weight_used", False),
+                "selected_by": "manual",
+            }
+    return None
+
+
 # Keep old name for compatibility
 def run_model_validation(
     df: pd.DataFrame,

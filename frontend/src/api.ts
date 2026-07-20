@@ -146,13 +146,43 @@ export const api = {
       models: string[];
       balance_methods: string[];
       run_all_combinations: boolean;
+      selection_metric?: string;
+      auto_select_best?: boolean;
     }
   ) =>
-    request<{ result: Record<string, unknown> }>(`/api/session/${sessionId}/validate/models`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+    request<{ result: Record<string, unknown>; selected_algorithm?: Record<string, unknown> | null }>(
+      `/api/session/${sessionId}/validate/models`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    ),
+  selectAlgorithm: (
+    sessionId: string,
+    body: { model_id: string; balance_method: string; selection_metric?: string }
+  ) =>
+    request<{ selected_algorithm: Record<string, unknown> }>(
+      `/api/session/${sessionId}/select-algorithm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    ),
+  autoSelectAlgorithm: (sessionId: string, selection_metric = "auc_roc") =>
+    request<{ selected_algorithm: Record<string, unknown> }>(
+      `/api/session/${sessionId}/select-algorithm/auto`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selection_metric }),
+      }
+    ),
+  getSelectedAlgorithm: (sessionId: string) =>
+    request<{ selected_algorithm: Record<string, unknown> | null }>(
+      `/api/session/${sessionId}/selected-algorithm`
+    ),
   manifest: (sessionId: string) =>
     request<Record<string, unknown>>(`/api/session/${sessionId}/manifest`),
   exportUrl: (sessionId: string) => `/api/session/${sessionId}/export.zip`,

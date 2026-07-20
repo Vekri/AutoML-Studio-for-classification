@@ -24,6 +24,7 @@ class StudioSession:
     feature_selection_result: list[dict[str, Any]] = field(default_factory=list)
     validation_report: dict[str, Any] = field(default_factory=dict)
     model_validation: dict[str, Any] = field(default_factory=dict)
+    selected_algorithm: dict[str, Any] = field(default_factory=dict)
     filename: str = "dataset.csv"
 
     @property

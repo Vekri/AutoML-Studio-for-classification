@@ -19,11 +19,13 @@ def build_studio_manifest(
     binning_config: dict[str, Any],
     validation_report: dict[str, Any],
     feature_selection: dict[str, Any],
+    selected_algorithm: dict[str, Any] | None = None,
+    model_validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create master manifest for Predictions Studio integration."""
     return {
         "studio": "AutoML Studio for Binary Classification",
-        "version": "1.0.0",
+        "version": "2.1.0",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "problem_domain": domain,
         "target_column": target,
@@ -33,12 +35,22 @@ def build_studio_manifest(
         "binning_config": binning_config,
         "validation_report": validation_report,
         "feature_selection": feature_selection,
+        "selected_algorithm": selected_algorithm or {},
+        "model_validation_summary": {
+            "combinations_count": (model_validation or {}).get("combinations_count"),
+            "best": (model_validation or {}).get("best"),
+            "models_requested": (model_validation or {}).get("models_requested"),
+            "balance_methods_requested": (model_validation or {}).get("balance_methods_requested"),
+        }
+        if model_validation
+        else {},
         "pipeline_steps": [
             "load_data",
             "apply_cleaning",
             "apply_binning",
             "select_features",
-            "encode_categorical",
+            "balance_classes",
+            "train_selected_algorithm",
             "predict",
         ],
         "ready_for_predictions_studio": True,
@@ -68,14 +80,21 @@ def export_zip_bundle(
             "feature_selection.json",
             json.dumps(feature_selection_results, indent=2, default=str),
         )
+        zf.writestr(
+            "selected_algorithm.json",
+            json.dumps(manifest.get("selected_algorithm") or {}, indent=2, default=str),
+        )
         zf.writestr("domain_config.json", json.dumps({"domain": domain}, indent=2))
         zf.writestr("studio_manifest.json", json.dumps(manifest, indent=2, default=str))
 
+        algo = manifest.get("selected_algorithm") or {}
         readme = f"""AutoML Studio Export Bundle
 ===========================
 Domain: {domain}
 Target: {manifest['target_column']}
 Features: {len(feature_list)}
+Best algorithm: {algo.get('model_label', 'N/A')}
+Balancing: {algo.get('balance_label', 'N/A')}
 Created: {manifest['created_at']}
 
 Files:
@@ -85,6 +104,7 @@ Files:
 - binning_config.json       : Binning rules and edges
 - validation_report.json    : Data quality validation results
 - feature_selection.json    : Feature selection scores
+- selected_algorithm.json   : Best / selected ML algorithm
 - domain_config.json        : Business domain settings
 - studio_manifest.json      : Master config for Predictions Studio
 """
