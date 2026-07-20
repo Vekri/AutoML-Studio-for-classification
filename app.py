@@ -1,6 +1,7 @@
 """AutoML Studio for Binary Classification — main application."""
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -148,6 +149,12 @@ if current_step == 1:
         st.subheader("Upload CSV")
         uploaded = st.file_uploader("Choose a CSV file", type=["csv"], help="Upload your business dataset")
 
+        sample_path = Path(__file__).parent / "sample_data" / "banking_loan_default.csv"
+        if sample_path.exists() and st.button("Try Sample Data (Banking)", use_container_width=True):
+            st.session_state.raw_df = pd.read_csv(sample_path)
+            st.session_state.domain = "Banking"
+            st.rerun()
+
         if uploaded:
             try:
                 df = load_csv(uploaded)
@@ -170,7 +177,7 @@ if current_step == 1:
         st.markdown("**Common target variables:**")
         st.write(", ".join(f"`{t}`" for t in info["common_targets"]))
         st.markdown("**Recommended metrics:**")
-        st.write(", ".join(info["key_metrics"])
+        st.write(", ".join(info["key_metrics"]))
 
     if st.session_state.raw_df is not None:
         st.subheader("Dataset Overview")

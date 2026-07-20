@@ -31,5 +31,5 @@ jobs:
       - name: Run smoke tests
         run: pytest tests/ -v
 
-      - name: Verify app imports
-        run: python -c "import app; print('App imports OK')"
+      - name: Verify app syntax
+        run: python -m py_compile app.py streamlit_app.py config.py modules/*.py

@@ -187,13 +187,15 @@ def apply_cleaning(
 def auto_clean(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Apply all recommended cleaning actions automatically."""
     recs = generate_cleaning_recommendations(df, target)
-    actionable = [
-        r
-        for r in recs
-        if r["action"]
-        in ("drop_duplicates", "drop_column", "drop_target_missing", "impute", "cap_outliers")
-        and r.get("severity") != "high"
-        or r["action"] in ("drop_duplicates", "drop_target_missing")
-        or (r["action"] == "drop_column" and r.get("severity") == "high")
-    ]
+    safe_actions = {"drop_duplicates", "drop_target_missing", "impute", "cap_outliers"}
+    actionable = []
+    for r in recs:
+        action = r.get("action")
+        severity = r.get("severity")
+        if action in ("drop_duplicates", "drop_target_missing"):
+            actionable.append(r)
+        elif action == "drop_column" and severity == "high":
+            actionable.append(r)
+        elif action in safe_actions and severity != "high":
+            actionable.append(r)
     return apply_cleaning(df, target, actionable)
