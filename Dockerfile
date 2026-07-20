@@ -24,8 +24,11 @@ COPY config.py /app/config.py
 COPY modules /app/modules
 COPY sample_data /app/sample_data
 COPY backend /app/backend
+COPY start.sh /app/start.sh
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 EXPOSE 7860
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "7860"]
+RUN chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]

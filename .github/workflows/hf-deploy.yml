@@ -9,37 +9,45 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Deploy to Hugging Face Space
+      - name: Deploy to Hugging Face (Docker Space)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           if [ -z "$HF_TOKEN" ]; then
-            echo "HF_TOKEN secret not set — skip HF deploy."
-            echo "To enable: create Space at huggingface.co/new-space then add HF_TOKEN to GitHub repo secrets."
+            echo "HF_TOKEN not set — create Space manually at huggingface.co/new-space (Docker SDK)"
             exit 0
           fi
           pip install huggingface_hub
           python << 'PYEOF'
           import os
-          from huggingface_hub import HfApi
+          from huggingface_hub import HfApi, create_repo
 
-          api = HfApi(token=os.environ["HF_TOKEN"])
+          token = os.environ["HF_TOKEN"]
+          api = HfApi(token=token)
           repo_id = "Vekri/automl-studio-classification"
 
-          try:
-              api.create_repo(repo_id=repo_id, repo_type="space", space_sdk="streamlit", exist_ok=True)
-          except Exception as e:
-              print(f"Repo create note: {e}")
+          create_repo(
+              repo_id=repo_id,
+              repo_type="space",
+              space_sdk="docker",
+              exist_ok=True,
+              token=token,
+          )
 
           api.upload_folder(
               folder_path=".",
               repo_id=repo_id,
               repo_type="space",
-              ignore_patterns=[".git/*", ".github/*", "__pycache__/*", ".pytest_cache/*", "*.pyc"],
-              commit_message="Deploy from GitHub Actions",
+              ignore_patterns=[
+                  ".git/*", ".github/*", "__pycache__/*", ".pytest_cache/*",
+                  "*.pyc", "frontend/node_modules/*", "frontend/dist/*",
+                  ".venv/*", "venv/*",
+              ],
+              commit_message="Deploy React + FastAPI from GitHub Actions",
+              token=token,
           )
-          print(f"Deployed to https://huggingface.co/spaces/{repo_id}")
+          print(f"Live at: https://huggingface.co/spaces/{repo_id}")
+          print(f"App URL: https://vekri-automl-studio-classification.hf.space")
           PYEOF

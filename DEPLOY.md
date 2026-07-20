@@ -1,76 +1,117 @@
-# AutoML Studio (React + Hugging Face)
+# Deploy AutoML Studio — FREE public servers
 
-Free open-source **binary classification** AutoML studio.
+The Hugging Face 404 means that Space was never created. Use one of these **other free hosts** instead.
 
-- **Frontend:** React (Vite) + Recharts  
-- **Backend:** FastAPI + Pandas + Scikit-learn  
-- **Deploy:** Hugging Face Spaces (Docker)
+---
 
-## Features
+## Option 1 — Render.com (Recommended · Free)
 
-1. Upload CSV / sample banking data  
-2. Business domain (Banking, Retail, Healthcare, …)  
-3. Target + keep/drop columns  
-4. Cleaning recommendations  
-5. Visualizations  
-6. Binning + WoE/IV  
-7. Feature selection  
-8. Validation + ZIP export for Predictions Studio  
+### Steps
 
-## Local development
+1. Open **[dashboard.render.com](https://dashboard.render.com)**
+2. Sign up with **GitHub** (account that owns `Vekri`)
+3. Click **New +** → **Blueprint**
+4. Select repo: **`Vekri/AutoML-Studio-for-classification`**
+5. Click **Apply**
+6. Wait 5–10 minutes for Docker build
 
-### 1. Backend
+### Your public URL
 
-```bash
-pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload --port 7860
+```
+https://automl-studio-classification.onrender.com
 ```
 
-### 2. Frontend
+Anyone can open it — free, no login for visitors.
+
+### If Blueprint fails — create Web Service manually
+
+1. **New +** → **Web Service**
+2. Connect the same GitHub repo
+3. Settings:
+
+| Field | Value |
+|-------|-------|
+| Runtime | **Docker** |
+| Branch | `main` |
+| Region | Oregon (or closest) |
+| Instance type | **Free** |
+| Health check path | `/api/health` |
+
+4. Click **Deploy**
+
+### First load note
+
+Free Render sleeps after ~15 min idle. First open may take 30–60 seconds — wait, then refresh.
+
+---
+
+## Option 2 — Railway.app (Free trial / hobby)
+
+1. Open **[railway.app](https://railway.app)** → Login with GitHub
+2. **New Project** → **Deploy from GitHub repo**
+3. Choose `Vekri/AutoML-Studio-for-classification`
+4. Railway detects `Dockerfile` automatically
+5. Generate a public domain: **Settings** → **Networking** → **Generate Domain**
+
+URL looks like: `https://automl-studio-classification-production.up.railway.app`
+
+---
+
+## Option 3 — Fly.io (Free allowance)
+
+Install [flyctl](https://fly.io/docs/hands-on/install-flyctl/), then:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+fly auth login
+fly launch --name automl-studio-classification --no-deploy
+fly deploy
 ```
 
-Open **http://localhost:5173** (Vite proxies `/api` → backend).
+App URL: `https://automl-studio-classification.fly.dev`
 
-### One-command (production-like)
+---
+
+## Verify deploy worked
+
+Open:
+
+```
+https://YOUR-URL/api/health
+```
+
+Expected:
+
+```json
+{"status":"ok","app":"AutoML Studio","version":"2.0.0"}
+```
+
+Then open the root URL — React AutoML Studio UI.
+
+---
+
+## Local (always works)
 
 ```bash
-cd frontend && npm install && npm run build && cd ..
+# Dev UI
+START_DEV.bat
+
+# Or single server
+cd frontend && npm run build && cd ..
 uvicorn backend.main:app --host 0.0.0.0 --port 7860
 ```
 
-Open **http://localhost:7860**
+- UI (dev): http://localhost:5173  
+- Built: http://localhost:7860  
 
-## Deploy to Hugging Face Spaces (free + public)
+---
 
-1. Go to **[huggingface.co/new-space](https://huggingface.co/new-space)**
-2. Space name: `automl-studio-classification`
-3. SDK: **Docker**
-4. Create Space → **Files** → upload this repo **or** connect GitHub `Vekri/AutoML-Studio-for-classification`
-5. Wait for build
+## Which should you pick?
 
-Public URL:
-`https://huggingface.co/spaces/Vekri/automl-studio-classification`
+| Host | Best for | Catch |
+|------|----------|--------|
+| **Render** | Easiest free public URL | Sleeps when idle |
+| **Railway** | Fast deploys | Free credits limited |
+| **Fly.io** | Always-on feel | Needs CLI |
+| Hugging Face | ML demos | Space must be created first |
 
-Anyone can use it — free, no login for visitors.
-
-### Connect GitHub to Space
-
-Space → **Settings** → **Repository** → link this GitHub repo.  
-Pushes to `main` rebuild the Space automatically.
-
-## API
-
-- `GET /api/health`
-- `GET /api/domains`
-- `POST /api/upload`
-- `POST /api/sample`
-- Session endpoints under `/api/session/{id}/...`
-
-## License
-
-MIT
+**Start with Render** — it's the simplest free public option for this app.

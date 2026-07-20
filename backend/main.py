@@ -588,14 +588,32 @@ def export_manifest(session_id: str):
 # ---------------------------------------------------------------------------
 
 STATIC_DIR = ROOT / "frontend" / "dist"
-if STATIC_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+ASSETS_DIR = STATIC_DIR / "assets"
 
-    @app.get("/{full_path:path}")
-    def spa(full_path: str = ""):
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
-        index = STATIC_DIR / "index.html"
-        if index.exists():
-            return FileResponse(index)
-        raise HTTPException(status_code=404, detail="Frontend not built")
+
+@app.get("/")
+def root():
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(index, media_type="text/html")
+    return {
+        "status": "ok",
+        "message": "AutoML Studio API is running. Frontend not built.",
+        "docs": "/docs",
+        "health": "/api/health",
+    }
+
+
+if ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+
+
+@app.get("/{full_path:path}")
+def spa_fallback(full_path: str):
+    """SPA fallback — serve index.html for client-side routes."""
+    if full_path.startswith("api/") or full_path == "docs" or full_path.startswith("docs/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(index, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Frontend not built. Run: cd frontend && npm run build")

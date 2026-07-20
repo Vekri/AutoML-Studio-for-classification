@@ -12,7 +12,7 @@ short_description: Free AutoML for binary classification — React + FastAPI
 
 # AutoML Studio for Binary Classification
 
-**Free & open-source** · React UI · FastAPI · Hugging Face Spaces
+**Free & open-source** · React UI · FastAPI · Deploy on **Render / Railway / Fly.io**
 
 ## Stack
 
@@ -21,9 +21,21 @@ short_description: Free AutoML for binary classification — React + FastAPI
 | UI | React + Vite + Recharts |
 | API | FastAPI |
 | ML | Pandas, Scikit-learn |
-| Hosting | Hugging Face Spaces (Docker) — free & public |
+| Hosting | **Render.com (free)** · Railway · Fly.io · HF Spaces |
 
-## Quick start (local)
+## Deploy free (public URL)
+
+### Recommended: Render.com
+
+1. Go to **[dashboard.render.com](https://dashboard.render.com)** → sign in with GitHub  
+2. **New +** → **Blueprint** → select `Vekri/AutoML-Studio-for-classification`  
+3. Click **Apply** → wait for build  
+
+Public URL: **`https://automl-studio-classification.onrender.com`**
+
+Full guide: **[DEPLOY.md](DEPLOY.md)**
+
+## Local quick start
 
 ```bash
 # Terminal 1 — API
@@ -38,17 +50,7 @@ npm run dev
 
 Open **http://localhost:5173**
 
-Or double-click **`START_DEV.bat`** (dev) / **`START.bat`** (built UI on :7860).
-
-## Deploy free on Hugging Face
-
-1. Create a Space with **Docker** SDK: [huggingface.co/new-space](https://huggingface.co/new-space)
-2. Connect GitHub repo `Vekri/AutoML-Studio-for-classification`
-3. Public app: `https://huggingface.co/spaces/<you>/automl-studio-classification`
-
-Anyone can open the link — no login required for visitors.
-
-See **[DEPLOY.md](DEPLOY.md)** for step-by-step.
+Or double-click **`START_DEV.bat`** / **`START.bat`**.
 
 ## Workflow
 

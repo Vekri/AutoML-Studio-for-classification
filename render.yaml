@@ -1,10 +1,15 @@
+# Free hosting — Render (recommended) + Fly.io + Railway
+# AutoML Studio: React + FastAPI Docker image
+
 services:
   - type: web
     name: automl-studio-classification
-    runtime: python
+    runtime: docker
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run streamlit_app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11.0"
+      - key: PYTHONUNBUFFERED
+        value: "1"
