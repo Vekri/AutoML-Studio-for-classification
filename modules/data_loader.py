@@ -64,19 +64,22 @@ def detect_binary_target(series: pd.Series) -> dict[str, Any]:
     unique_vals = clean.unique()
     n_unique = len(unique_vals)
 
+    counts = clean.value_counts()
+    # JSON-safe keys/values (numpy types break st.json)
+    class_counts = {str(k): int(v) for k, v in counts.items()}
+
     result = {
         "is_binary": n_unique == 2,
-        "n_unique": n_unique,
+        "n_unique": int(n_unique),
         "unique_values": [str(v) for v in unique_vals[:10]],
-        "class_counts": clean.value_counts().to_dict(),
+        "class_counts": class_counts,
         "imbalance_ratio": None,
     }
 
     if n_unique == 2:
-        counts = clean.value_counts()
-        minority = counts.min()
-        majority = counts.max()
-        result["imbalance_ratio"] = round(minority / majority, 4) if majority else 0
+        minority = int(counts.min())
+        majority = int(counts.max())
+        result["imbalance_ratio"] = round(minority / majority, 4) if majority else 0.0
 
     return result
 

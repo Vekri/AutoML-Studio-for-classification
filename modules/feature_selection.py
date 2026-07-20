@@ -18,24 +18,50 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 
 
+def _is_id_like(series: pd.Series) -> bool:
+    name = str(series.name or "").lower()
+    if any(tok in name for tok in ("id", "uuid", "guid", "index", "key")):
+        nunique = series.nunique(dropna=True)
+        if nunique >= max(10, int(0.9 * len(series))):
+            return True
+    if not pd.api.types.is_numeric_dtype(series):
+        nunique = series.nunique(dropna=True)
+        if nunique >= max(50, int(0.95 * len(series))):
+            return True
+    return False
+
+
 def _prepare_xy(df: pd.DataFrame, target: str, features: list[str] | None = None):
     feature_cols = features or [c for c in df.columns if c != target]
+    feature_cols = [c for c in feature_cols if c in df.columns and c != target]
+    # Drop ID-like / all-unique columns that break models
+    feature_cols = [c for c in feature_cols if not _is_id_like(df[c])]
+
+    if not feature_cols:
+        raise ValueError("No usable features found after removing ID-like columns.")
+
     X = df[feature_cols].copy()
     y = df[target].copy()
+
+    # Drop rows with missing target
+    mask = y.notna()
+    X = X.loc[mask].copy()
+    y = y.loc[mask].copy()
 
     if not pd.api.types.is_numeric_dtype(y):
         le = LabelEncoder()
         y = le.fit_transform(y.astype(str))
+    else:
+        y = y.astype(int) if set(pd.Series(y).dropna().unique()).issubset({0, 1}) else y
 
     encoders: dict[str, LabelEncoder] = {}
-    for col in X.select_dtypes(exclude=["number"]).columns:
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col].astype(str))
-        encoders[col] = le
-
-    X = X.fillna(X.median(numeric_only=True))
-    for col in X.select_dtypes(exclude=["number"]).columns:
-        X[col] = X[col].fillna(X[col].mode().iloc[0] if not X[col].mode().empty else 0)
+    for col in list(X.columns):
+        if not pd.api.types.is_numeric_dtype(X[col]):
+            le = LabelEncoder()
+            X[col] = le.fit_transform(X[col].astype(str).fillna("__missing__"))
+            encoders[col] = le
+        else:
+            X[col] = X[col].fillna(X[col].median() if X[col].notna().any() else 0)
 
     return X, y, encoders
 
@@ -53,14 +79,19 @@ def correlation_feature_selection(
     return result
 
 
+def _mark_top_k(result: pd.DataFrame, top_k: int) -> pd.DataFrame:
+    result = result.reset_index(drop=True)
+    k = min(top_k, len(result))
+    result["selected"] = result.index < k
+    return result
+
+
 def mutual_info_selection(df: pd.DataFrame, target: str, top_k: int = 10) -> pd.DataFrame:
     X, y, _ = _prepare_xy(df, target)
     scores = mutual_info_classif(X, y, random_state=42)
     result = pd.DataFrame({"feature": X.columns, "mutual_info": scores})
     result = result.sort_values("mutual_info", ascending=False)
-    result["selected"] = False
-    result.iloc[:top_k, result.columns.get_loc("selected")] = True
-    return result
+    return _mark_top_k(result, top_k)
 
 
 def chi_square_selection(df: pd.DataFrame, target: str, top_k: int = 10) -> pd.DataFrame:
@@ -68,21 +99,17 @@ def chi_square_selection(df: pd.DataFrame, target: str, top_k: int = 10) -> pd.D
     scaler = MinMaxScaler()
     X_scaled = scaler.fit_transform(X)
     scores, pvalues = chi2(X_scaled, y)
-    result = pd.DataFrame({"feature": X.columns, "chi2": scores, "p_value": pvalues})
+    result = pd.DataFrame({"feature": list(X.columns), "chi2": scores, "p_value": pvalues})
     result = result.sort_values("chi2", ascending=False)
-    result["selected"] = False
-    result.iloc[:top_k, result.columns.get_loc("selected")] = True
-    return result
+    return _mark_top_k(result, top_k)
 
 
 def anova_selection(df: pd.DataFrame, target: str, top_k: int = 10) -> pd.DataFrame:
     X, y, _ = _prepare_xy(df, target)
     scores, pvalues = f_classif(X, y)
-    result = pd.DataFrame({"feature": X.columns, "f_score": scores, "p_value": pvalues})
+    result = pd.DataFrame({"feature": list(X.columns), "f_score": scores, "p_value": pvalues})
     result = result.sort_values("f_score", ascending=False)
-    result["selected"] = False
-    result.iloc[:top_k, result.columns.get_loc("selected")] = True
-    return result
+    return _mark_top_k(result, top_k)
 
 
 def rfe_selection(df: pd.DataFrame, target: str, n_features: int = 10) -> pd.DataFrame:

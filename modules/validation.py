@@ -103,22 +103,45 @@ def run_model_validation(
     cv_folds: int = 5,
 ) -> dict[str, Any]:
     """Quick model validation with train/test split and cross-validation."""
-    X = df[features].copy()
-    y = df[target].copy()
+    features = [c for c in features if c in df.columns and c != target]
+    if not features:
+        raise ValueError("No valid features available for model validation.")
+
+    work = df[features + [target]].dropna(subset=[target]).copy()
+    X = work[features].copy()
+    y = work[target].copy()
 
     if not pd.api.types.is_numeric_dtype(y):
         y = LabelEncoder().fit_transform(y.astype(str))
+    else:
+        y = y.astype(int)
 
-    for col in X.select_dtypes(exclude=["number"]).columns:
-        X[col] = LabelEncoder().fit_transform(X[col].astype(str))
+    for col in X.columns:
+        if not pd.api.types.is_numeric_dtype(X[col]):
+            X[col] = LabelEncoder().fit_transform(X[col].astype(str).fillna("__missing__"))
+        else:
+            X[col] = X[col].fillna(X[col].median() if X[col].notna().any() else 0)
 
-    X = X.fillna(X.median(numeric_only=True))
+    # Ensure enough samples per class for stratify
+    unique, counts = np.unique(y, return_counts=True)
+    can_stratify = len(unique) == 2 and counts.min() >= 2
+
+    n_splits = min(cv_folds, 5, int(counts.min()) if can_stratify else 2)
+    n_splits = max(2, n_splits)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
+        X,
+        y,
+        test_size=min(test_size, 0.4),
+        random_state=42,
+        stratify=y if can_stratify else None,
     )
 
-    results: dict[str, Any] = {"models": {}, "split": {"train": len(X_train), "test": len(X_test)}}
+    results: dict[str, Any] = {
+        "models": {},
+        "split": {"train": int(len(X_train)), "test": int(len(X_test))},
+        "features_used": features,
+    }
 
     for name, model in [
         ("Logistic Regression", LogisticRegression(max_iter=1000, random_state=42)),
@@ -128,16 +151,20 @@ def run_model_validation(
         y_pred = model.predict(X_test)
         y_prob = model.predict_proba(X_test)[:, 1]
 
-        cv_scores = cross_val_score(model, X, y, cv=min(cv_folds, 5), scoring="roc_auc")
+        try:
+            cv_scores = cross_val_score(model, X, y, cv=n_splits, scoring="roc_auc")
+            cv_mean, cv_std = float(cv_scores.mean()), float(cv_scores.std())
+        except Exception:
+            cv_mean, cv_std = float("nan"), float("nan")
 
         results["models"][name] = {
-            "accuracy": round(accuracy_score(y_test, y_pred), 4),
-            "precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
-            "recall": round(recall_score(y_test, y_pred, zero_division=0), 4),
-            "f1": round(f1_score(y_test, y_pred, zero_division=0), 4),
-            "auc_roc": round(roc_auc_score(y_test, y_prob), 4),
-            "cv_auc_mean": round(cv_scores.mean(), 4),
-            "cv_auc_std": round(cv_scores.std(), 4),
+            "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
+            "precision": round(float(precision_score(y_test, y_pred, zero_division=0)), 4),
+            "recall": round(float(recall_score(y_test, y_pred, zero_division=0)), 4),
+            "f1": round(float(f1_score(y_test, y_pred, zero_division=0)), 4),
+            "auc_roc": round(float(roc_auc_score(y_test, y_prob)), 4),
+            "cv_auc_mean": round(cv_mean, 4) if cv_mean == cv_mean else None,
+            "cv_auc_std": round(cv_std, 4) if cv_std == cv_std else None,
         }
 
     return results
