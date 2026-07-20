@@ -2,7 +2,9 @@
 
 **Free & open-source** AutoML pipeline for binary classification. Built with 100% free tools — Python, Streamlit, Pandas, Scikit-learn, Plotly. No paid APIs required.
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io)
+[![Deploy to Streamlit Cloud](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/deploy?repository=Vekri/AutoML-Studio-for-classification&branch=main&mainModule=streamlit_app.py)
+
+> **Seeing "You do not have access to this app"?** The app is not deployed yet. Follow **[DEPLOY.md](DEPLOY.md)** step by step.
 
 ## Live Demo (Free Public Access)
 
