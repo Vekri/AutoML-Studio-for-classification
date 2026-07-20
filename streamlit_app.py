@@ -91,30 +91,47 @@ def go_to_step(n: int) -> None:
 
 
 def active_df() -> pd.DataFrame | None:
-    if st.session_state.processed_df is not None:
-        return st.session_state.processed_df
-    return st.session_state.raw_df
+    """Return processed data if available, else raw — never use `df or other`."""
+    processed = st.session_state.get("processed_df")
+    if isinstance(processed, pd.DataFrame):
+        return processed
+    raw = st.session_state.get("raw_df")
+    if isinstance(raw, pd.DataFrame):
+        return raw
+    return None
+
+
+def ensure_domain() -> str:
+    """Keep domain as a valid string (never a DataFrame)."""
+    domain = st.session_state.get("domain")
+    if not isinstance(domain, str) or domain not in PROBLEM_DOMAINS:
+        domain = "General Binary Classification"
+        st.session_state.domain = domain
+    return domain
 
 
 def ensure_target() -> str | None:
     """Return target if set; otherwise try to auto-suggest from raw data."""
-    target = st.session_state.target
-    df = st.session_state.raw_df
-    if target and df is not None and target in df.columns:
-        return target
-    if df is None:
+    target = st.session_state.get("target")
+    df = active_df()
+    if not isinstance(df, pd.DataFrame):
         return None
-    domain_info = PROBLEM_DOMAINS.get(st.session_state.domain, {})
+    # Never use `if target` — a Series/DataFrame would raise ambiguous truth value
+    if isinstance(target, str) and target in df.columns:
+        return target
+    domain_info = PROBLEM_DOMAINS.get(ensure_domain(), {})
     suggested = suggest_target_column(df, domain_info.get("common_targets", []))
-    if suggested:
+    if isinstance(suggested, str) and suggested in df.columns:
         st.session_state.target = suggested
         return suggested
     return None
 
 
 def usable_features(df: pd.DataFrame, target: str) -> list[str]:
-    selected = st.session_state.selected_features or []
-    cols = [c for c in selected if c in df.columns and c != target]
+    selected = st.session_state.get("selected_features")
+    if not isinstance(selected, list):
+        selected = []
+    cols = [c for c in selected if isinstance(c, str) and c in df.columns and c != target]
     if cols:
         return cols
     return [
@@ -185,17 +202,23 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    if st.session_state.raw_df is not None:
+    if isinstance(st.session_state.get("raw_df"), pd.DataFrame):
         shape = st.session_state.raw_df.shape
         st.success(f"Data loaded: {shape[0]:,} rows × {shape[1]} cols")
-        if st.session_state.target:
-            st.info(f"Target: `{st.session_state.target}`")
+        tgt = st.session_state.get("target")
+        if isinstance(tgt, str) and tgt:
+            st.info(f"Target: `{tgt}`")
     else:
         st.warning("Upload a CSV or use sample data")
 
     if st.button("🔄 Reset Session", use_container_width=True):
         for key, val in DEFAULTS.items():
-            st.session_state[key] = val if not isinstance(val, (list, dict)) else (val.copy() if isinstance(val, dict) else list(val))
+            if isinstance(val, dict):
+                st.session_state[key] = {}
+            elif isinstance(val, list):
+                st.session_state[key] = []
+            else:
+                st.session_state[key] = val
         st.rerun()
 
 current_step = int(st.session_state.workflow_step)
@@ -253,15 +276,23 @@ if current_step == 1:
     with col2:
         st.subheader("Business Problem Domain")
         domains = list(PROBLEM_DOMAINS.keys())
-        domain_idx = domains.index(st.session_state.domain) if st.session_state.domain in domains else 0
-        domain = st.selectbox("Select industry / use case", domains, index=domain_idx)
-        st.session_state.domain = domain
-        info = PROBLEM_DOMAINS[domain]
+        current_domain = st.session_state.get("domain", domains[-1])
+        if not isinstance(current_domain, str) or current_domain not in domains:
+            current_domain = domains[-1]
+            st.session_state.domain = current_domain
+        domain = st.selectbox(
+            "Select industry / use case",
+            domains,
+            index=domains.index(current_domain),
+            key="domain_select",
+        )
+        st.session_state.domain = str(domain)
+        info = PROBLEM_DOMAINS[str(domain)]
         st.info(f"**{domain}** — {info['description']}")
         st.markdown("**Common targets:** " + ", ".join(f"`{t}`" for t in info["common_targets"]))
         st.markdown("**Key metrics:** " + ", ".join(info["key_metrics"]))
 
-    if st.session_state.raw_df is not None:
+    if isinstance(st.session_state.get("raw_df"), pd.DataFrame):
         st.subheader("Dataset Overview")
         summary = get_column_summary(st.session_state.raw_df)
         c1, c2, c3, c4 = st.columns(4)
@@ -279,28 +310,35 @@ if current_step == 1:
 elif current_step == 2:
     st.header("🎯 Target Variable & Column Selection")
 
-    if st.session_state.raw_df is None:
+    raw = st.session_state.get("raw_df")
+    if not isinstance(raw, pd.DataFrame):
         st.warning("Please upload a CSV (or sample data) in Step 1 first.")
         if st.button("Go to Step 1"):
             go_to_step(1)
             st.rerun()
     else:
-        df = st.session_state.raw_df
-        domain_info = PROBLEM_DOMAINS[st.session_state.domain]
+        df = raw
+        domain_info = PROBLEM_DOMAINS[ensure_domain()]
         suggested = suggest_target_column(df, domain_info["common_targets"])
         cols = df.columns.tolist()
 
-        if st.session_state.target in cols:
-            default_idx = cols.index(st.session_state.target)
-        elif suggested and suggested in cols:
+        current_target = st.session_state.get("target")
+        if isinstance(current_target, str) and current_target in cols:
+            default_idx = cols.index(current_target)
+        elif isinstance(suggested, str) and suggested in cols:
             default_idx = cols.index(suggested)
         else:
             default_idx = 0
 
         col1, col2 = st.columns([1, 2])
         with col1:
-            target = st.selectbox("Select Target Variable", cols, index=default_idx)
-            st.session_state.target = target
+            target = st.selectbox(
+                "Select Target Variable",
+                cols,
+                index=default_idx,
+                key="target_select",
+            )
+            st.session_state.target = str(target)
             target_info = detect_binary_target(df[target])
             if target_info["is_binary"]:
                 st.success("✅ Valid binary target")
@@ -322,14 +360,21 @@ elif current_step == 2:
         )
         all_features = [c for c in cols if c != target]
 
+        keep_cols = st.session_state.get("keep_cols")
+        if not isinstance(keep_cols, list):
+            keep_cols = []
+        drop_cols = st.session_state.get("drop_cols")
+        if not isinstance(drop_cols, list):
+            drop_cols = []
+
         if mode == "Keep selected columns":
-            default_keep = [c for c in (st.session_state.keep_cols or all_features) if c in all_features]
+            default_keep = [c for c in (keep_cols if keep_cols else all_features) if c in all_features]
             keep = st.multiselect("Columns to KEEP (target always kept)", all_features, default=default_keep)
             st.session_state.keep_cols = keep
             st.session_state.drop_cols = []
             filtered = apply_column_selection(df, target, keep_columns=keep)
         else:
-            default_drop = [c for c in st.session_state.drop_cols if c in all_features]
+            default_drop = [c for c in drop_cols if c in all_features]
             drop = st.multiselect("Columns to DROP", all_features, default=default_drop)
             st.session_state.drop_cols = drop
             st.session_state.keep_cols = []
@@ -351,13 +396,20 @@ elif current_step == 3:
     df = active_df()
     target = ensure_target()
 
-    if df is None or target is None or target not in df.columns:
+    if not isinstance(df, pd.DataFrame) or not isinstance(target, str) or target not in df.columns:
         st.warning("Complete Steps 1 & 2 first (upload data and select target).")
+        if st.button("Go to Step 2", key="clean_goto_2"):
+            go_to_step(2)
+            st.rerun()
     else:
-        recommendations = generate_cleaning_recommendations(df, target)
+        try:
+            recommendations = generate_cleaning_recommendations(df, target)
+        except Exception as exc:
+            st.error(f"Could not generate cleaning recommendations: {exc}")
+            recommendations = []
         st.session_state.recommendations = recommendations
 
-        if not recommendations:
+        if len(recommendations) == 0:
             st.success("No major cleaning issues detected.")
         else:
             severity_colors = {"high": "🔴", "medium": "🟡", "low": "🟢"}
@@ -365,7 +417,7 @@ elif current_step == 3:
                 icon = severity_colors.get(rec["severity"], "⚪")
                 with st.expander(
                     f"{icon} [{rec['category'].upper()}] {rec['issue']}",
-                    expanded=rec["severity"] == "high",
+                    expanded=(rec.get("severity") == "high"),
                 ):
                     st.markdown(f"**Recommendation:** {rec['recommendation']}")
                     st.caption(f"Action: `{rec.get('action', 'N/A')}`")
@@ -374,27 +426,39 @@ elif current_step == 3:
         col1, col2 = st.columns(2)
         with col1:
             if st.button("✨ Auto-Clean (safe)", use_container_width=True, type="primary"):
-                cleaned, config = auto_clean(df, target)
-                st.session_state.processed_df = cleaned
-                st.session_state.cleaning_config = config
-                st.success(f"Cleaning applied! {len(df)} → {len(cleaned)} rows, {len(cleaned.columns)} cols")
-                st.rerun()
+                try:
+                    cleaned, config = auto_clean(df, target)
+                    st.session_state.processed_df = cleaned
+                    st.session_state.cleaning_config = config
+                    st.success(
+                        f"Cleaning applied! {len(df)} → {len(cleaned)} rows, {len(cleaned.columns)} cols"
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Auto-clean failed: {exc}")
         with col2:
             if st.button("🔧 Apply ALL recommendations", use_container_width=True):
-                actionable = [r for r in recommendations if r.get("action") not in ("fix_target", None)]
-                cleaned, config = apply_cleaning(df, target, actionable)
-                st.session_state.processed_df = cleaned
-                st.session_state.cleaning_config = config
-                st.success("All recommendations applied!")
-                st.rerun()
+                try:
+                    actionable = [
+                        r for r in recommendations if r.get("action") not in ("fix_target", None)
+                    ]
+                    cleaned, config = apply_cleaning(df, target, actionable)
+                    st.session_state.processed_df = cleaned
+                    st.session_state.cleaning_config = config
+                    st.success("All recommendations applied!")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Apply cleaning failed: {exc}")
 
-        if st.session_state.cleaning_config:
+        cleaning_config = st.session_state.get("cleaning_config")
+        if isinstance(cleaning_config, dict) and len(cleaning_config) > 0:
             st.subheader("Applied Cleaning Config")
-            st.json(st.session_state.cleaning_config)
+            st.json(cleaning_config)
 
-        if st.session_state.processed_df is not None:
+        processed = st.session_state.get("processed_df")
+        if isinstance(processed, pd.DataFrame):
             st.subheader("Current Data Preview")
-            st.dataframe(st.session_state.processed_df.head(10), use_container_width=True)
+            st.dataframe(processed.head(10), use_container_width=True)
 
     render_nav(3)
 
@@ -406,7 +470,7 @@ elif current_step == 4:
     df = active_df()
     target = ensure_target()
 
-    if df is None or target is None or target not in df.columns:
+    if not isinstance(df, pd.DataFrame) or not isinstance(target, str) or target not in df.columns:
         st.warning("Complete Steps 1 & 2 first.")
     else:
         tab1, tab2, tab3, tab4 = st.tabs(["Target & Missing", "Numeric", "Categorical", "Correlations"])
@@ -456,7 +520,7 @@ elif current_step == 5:
     df = active_df()
     target = ensure_target()
 
-    if df is None or target is None or target not in df.columns:
+    if not isinstance(df, pd.DataFrame) or not isinstance(target, str) or target not in df.columns:
         st.warning("Complete Steps 1 & 2 first.")
     else:
         num_cols = get_numeric_columns(df, exclude=[target])
@@ -488,7 +552,9 @@ elif current_step == 5:
             if bin_cols:
                 st.subheader("Weight of Evidence (WoE) & Information Value")
                 woe_col = st.selectbox("Column for WoE/IV", bin_cols, key="woe_col")
-                check_df = active_df() or df
+                check_df = active_df()
+                if check_df is None:
+                    check_df = df
                 binned_col = f"{woe_col}_binned"
                 try:
                     if binned_col in check_df.columns:
@@ -525,7 +591,7 @@ elif current_step == 6:
     df = active_df()
     target = ensure_target()
 
-    if df is None or target is None or target not in df.columns:
+    if not isinstance(df, pd.DataFrame) or not isinstance(target, str) or target not in df.columns:
         st.warning("Complete Steps 1 & 2 first.")
     else:
         n_feat = max(1, len(df.columns) - 1)
@@ -606,7 +672,7 @@ elif current_step == 7:
     df = active_df()
     target = ensure_target()
 
-    if df is None or target is None or target not in df.columns:
+    if not isinstance(df, pd.DataFrame) or not isinstance(target, str) or target not in df.columns:
         st.warning("Complete Steps 1 & 2 first.")
     else:
         features = usable_features(df, target)
@@ -666,7 +732,7 @@ elif current_step == 8:
     df = active_df()
     target = ensure_target()
 
-    if df is None or target is None or target not in df.columns:
+    if not isinstance(df, pd.DataFrame) or not isinstance(target, str) or target not in df.columns:
         st.warning("Complete the pipeline first (at least Steps 1 & 2).")
     else:
         features = usable_features(df, target)
