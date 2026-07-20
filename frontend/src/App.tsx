@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, DomainInfo, SessionPayload } from "./api";
+import { api, BalanceMethod, DomainInfo, ModelOption, SessionPayload } from "./api";
 
 const STEPS = [
   { id: 1, title: "Upload & Domain", blurb: "CSV + business problem" },
@@ -18,7 +18,7 @@ const STEPS = [
   { id: 4, title: "Visualizations", blurb: "Distributions" },
   { id: 5, title: "Binning", blurb: "WoE / IV" },
   { id: 6, title: "Feature Selection", blurb: "Rank & pick" },
-  { id: 7, title: "Validation", blurb: "Quality + models" },
+  { id: 7, title: "Balance & Models", blurb: "Sampling + ML models" },
   { id: 8, title: "Export", blurb: "Predictions Studio" },
 ];
 
@@ -53,6 +53,8 @@ export default function App() {
   const [step, setStep] = useState(1);
   const [domains, setDomains] = useState<DomainInfo[]>([]);
   const [methods, setMethods] = useState<string[]>([]);
+  const [balanceOptions, setBalanceOptions] = useState<BalanceMethod[]>([]);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [domain, setDomain] = useState("Banking");
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +96,17 @@ export default function App() {
   const [modelResult, setModelResult] = useState<Record<string, unknown> | null>(null);
   const [testSize, setTestSize] = useState(0.2);
   const [cvFolds, setCvFolds] = useState(5);
+  const [selectedBalances, setSelectedBalances] = useState<string[]>([
+    "none",
+    "class_weight",
+    "smote",
+  ]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([
+    "logistic_regression",
+    "random_forest",
+    "gradient_boosting",
+  ]);
+  const [runAllCombos, setRunAllCombos] = useState(true);
 
   // Step 8
   const [manifest, setManifest] = useState<Record<string, unknown> | null>(null);
@@ -104,7 +117,28 @@ export default function App() {
       .then((d) => {
         setDomains(d.domains);
         setMethods(d.feature_selection_methods);
-        if (d.feature_selection_methods.length) setFsMethod(d.feature_selection_methods[1] || d.feature_selection_methods[0]);
+        setBalanceOptions(d.balance_methods || []);
+        setModelOptions(d.models || []);
+        if (d.feature_selection_methods.length)
+          setFsMethod(d.feature_selection_methods[1] || d.feature_selection_methods[0]);
+        if (d.balance_methods?.length) {
+          setSelectedBalances(
+            d.balance_methods
+              .map((b) => b.id)
+              .filter((id) => ["none", "class_weight", "smote", "random_oversample"].includes(id))
+          );
+        }
+        if (d.models?.length) {
+          setSelectedModels(
+            d.models
+              .map((m) => m.id)
+              .filter((id) =>
+                ["logistic_regression", "random_forest", "gradient_boosting", "decision_tree"].includes(
+                  id
+                )
+              )
+          );
+        }
       })
       .catch((e) => setError(String(e.message || e)));
   }, []);
@@ -260,9 +294,24 @@ export default function App() {
 
   async function runModelValidation() {
     if (!session) return;
+    if (!selectedModels.length) {
+      setError("Select at least one model");
+      return;
+    }
+    if (!selectedBalances.length) {
+      setError("Select at least one balancing method");
+      return;
+    }
     const data = await run(
-      () => api.validateModels(session.session_id, { test_size: testSize, cv_folds: cvFolds }),
-      "Model validation done"
+      () =>
+        api.validateModels(session.session_id, {
+          test_size: testSize,
+          cv_folds: cvFolds,
+          models: selectedModels,
+          balance_methods: selectedBalances,
+          run_all_combinations: runAllCombos,
+        }),
+      "Model suite complete"
     );
     if (data) setModelResult(data.result);
   }
@@ -373,7 +422,7 @@ export default function App() {
               {step === 4 && "Explore distributions, missingness, and correlations."}
               {step === 5 && "Bin numeric features and inspect WoE / Information Value."}
               {step === 6 && "Rank features and select the strongest predictors."}
-              {step === 7 && "Run data-quality checks and quick baseline models."}
+              {step === 7 && "Choose balancing methods and models — run all combinations and compare."}
               {step === 8 && "Download the package for Predictions Studio."}
             </p>
           </div>
@@ -790,8 +839,9 @@ export default function App() {
 
         {step === 7 && session && (
           <div className="panel">
+            <p className="panel-title">Data quality</p>
             <div className="btn-row" style={{ marginTop: 0 }}>
-              <button className="primary" disabled={busy} onClick={runDataValidation}>
+              <button className="secondary" disabled={busy} onClick={runDataValidation}>
                 Run data validation
               </button>
             </div>
@@ -821,7 +871,76 @@ export default function App() {
                 ))}
               </div>
             )}
-            <div className="grid-2">
+
+            <p className="panel-title" style={{ marginTop: "1.25rem" }}>
+              Class balancing / sampling
+            </p>
+            <div className="btn-row" style={{ marginTop: 0, marginBottom: "0.5rem" }}>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setSelectedBalances(balanceOptions.map((b) => b.id))}
+              >
+                Select all balancing
+              </button>
+              <button className="secondary" type="button" onClick={() => setSelectedBalances(["none"])}>
+                None only
+              </button>
+            </div>
+            <div className="checks">
+              {balanceOptions.map((b) => (
+                <label key={b.id} title={b.description}>
+                  <input
+                    type="checkbox"
+                    checked={selectedBalances.includes(b.id)}
+                    onChange={(e) =>
+                      setSelectedBalances((prev) =>
+                        e.target.checked ? [...prev, b.id] : prev.filter((x) => x !== b.id)
+                      )
+                    }
+                  />
+                  {b.label}
+                </label>
+              ))}
+            </div>
+
+            <p className="panel-title" style={{ marginTop: "1.25rem" }}>
+              Models
+            </p>
+            <div className="btn-row" style={{ marginTop: 0, marginBottom: "0.5rem" }}>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setSelectedModels(modelOptions.map((m) => m.id))}
+              >
+                Select all models
+              </button>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setSelectedModels(["logistic_regression", "random_forest"])}
+              >
+                Logistic + RF
+              </button>
+            </div>
+            <div className="checks">
+              {modelOptions.map((m) => (
+                <label key={m.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedModels.includes(m.id)}
+                    onChange={(e) =>
+                      setSelectedModels((prev) =>
+                        e.target.checked ? [...prev, m.id] : prev.filter((x) => x !== m.id)
+                      )
+                    }
+                  />
+                  {m.label}
+                </label>
+              ))}
+            </div>
+
+            <div className="grid-2" style={{ marginTop: "1rem" }}>
               <div className="field">
                 <label>Test size: {testSize}</label>
                 <input
@@ -844,28 +963,67 @@ export default function App() {
                 />
               </div>
             </div>
+
+            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
+              <input
+                type="checkbox"
+                checked={runAllCombos}
+                onChange={(e) => setRunAllCombos(e.target.checked)}
+              />
+              Run all combinations (every balancing method × every model)
+            </label>
+
             <div className="btn-row">
-              <button className="secondary" disabled={busy} onClick={runModelValidation}>
-                Run model validation
+              <button className="primary" disabled={busy} onClick={runModelValidation}>
+                Train & compare models
               </button>
+              <span className="muted">
+                {selectedBalances.length} balancing × {selectedModels.length} models ={" "}
+                {selectedBalances.length * selectedModels.length} runs
+              </span>
             </div>
+
             {modelResult && (
-              <div style={{ marginTop: "1rem" }}>
-                {Object.entries((modelResult.models as Record<string, Record<string, number>>) || {}).map(
-                  ([name, metrics]) => (
-                    <div key={name} style={{ marginBottom: "1rem" }}>
-                      <h4>{name}</h4>
-                      <div className="grid-4">
-                        {["accuracy", "precision", "recall", "f1", "auc_roc", "cv_auc_mean"].map((k) => (
-                          <div className="metric" key={k}>
-                            <div className="label">{k}</div>
-                            <div className="value">{metrics[k] ?? "N/A"}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
+              <div style={{ marginTop: "1.25rem" }}>
+                {modelResult.best && (
+                  <div className="success">
+                    Best:{" "}
+                    <strong>
+                      {String((modelResult.best as Record<string, unknown>).model_label)} +{" "}
+                      {String((modelResult.best as Record<string, unknown>).balance_label)}
+                    </strong>{" "}
+                    (AUC{" "}
+                    {String(
+                      ((modelResult.best as Record<string, unknown>).metrics as Record<string, unknown>)
+                        ?.auc_roc ?? "N/A"
+                    )}
+                    )
+                  </div>
                 )}
+
+                <p className="panel-title">Leaderboard</p>
+                <PreviewTable
+                  rows={((modelResult.leaderboard as Record<string, unknown>[]) || []).map((r) => {
+                    const m = (r.metrics as Record<string, unknown>) || {};
+                    return {
+                      rank_model: r.model_label,
+                      balancing: r.balance_label,
+                      auc_roc: m.auc_roc,
+                      f1: m.f1,
+                      accuracy: m.accuracy,
+                      precision: m.precision,
+                      recall: m.recall,
+                      cv_auc: m.cv_auc_mean,
+                    };
+                  })}
+                />
+
+                <p className="panel-title" style={{ marginTop: "1rem" }}>
+                  Split info
+                </p>
+                <pre className="mono" style={{ fontSize: "0.8rem", whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(modelResult.split, null, 2)}
+                </pre>
               </div>
             )}
           </div>

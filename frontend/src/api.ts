@@ -5,6 +5,18 @@ export type DomainInfo = {
   key_metrics: string[];
 };
 
+export type BalanceMethod = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export type ModelOption = {
+  id: string;
+  label: string;
+  supports_class_weight: boolean;
+};
+
 export type SessionPayload = {
   session_id: string;
   filename: string;
@@ -45,7 +57,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<{ status: string }>("/api/health"),
   domains: () =>
-    request<{ domains: DomainInfo[]; feature_selection_methods: string[] }>("/api/domains"),
+    request<{
+      domains: DomainInfo[];
+      feature_selection_methods: string[];
+      balance_methods: BalanceMethod[];
+      models: ModelOption[];
+    }>("/api/domains"),
   sample: (domain = "Banking") =>
     request<SessionPayload>(`/api/sample?domain=${encodeURIComponent(domain)}`, { method: "POST" }),
   upload: async (file: File, domain: string) => {
@@ -121,7 +138,16 @@ export const api = {
       `/api/session/${sessionId}/validate/data`,
       { method: "POST" }
     ),
-  validateModels: (sessionId: string, body: { test_size: number; cv_folds: number }) =>
+  validateModels: (
+    sessionId: string,
+    body: {
+      test_size: number;
+      cv_folds: number;
+      models: string[];
+      balance_methods: string[];
+      run_all_combinations: boolean;
+    }
+  ) =>
     request<{ result: Record<string, unknown> }>(`/api/session/${sessionId}/validate/models`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

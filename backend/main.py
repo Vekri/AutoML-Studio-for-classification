@@ -35,6 +35,8 @@ from modules.feature_selection import (  # noqa: E402
     run_feature_selection,
 )
 from modules.validation import run_model_validation, validate_dataset  # noqa: E402
+from modules.balancing import list_balance_methods  # noqa: E402
+from modules.modeling import list_models, run_model_suite  # noqa: E402
 
 from backend.session_store import create_session, delete_session, get_session  # noqa: E402
 
@@ -83,6 +85,11 @@ class FeatureSelectionRequest(BaseModel):
 class ValidationRequest(BaseModel):
     test_size: float = 0.2
     cv_folds: int = 5
+    models: list[str] = Field(
+        default_factory=lambda: ["logistic_regression", "random_forest"]
+    )
+    balance_methods: list[str] = Field(default_factory=lambda: ["none", "class_weight", "smote"])
+    run_all_combinations: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +162,8 @@ def domains():
             for name, meta in PROBLEM_DOMAINS.items()
         ],
         "feature_selection_methods": FEATURE_SELECTION_METHODS,
+        "balance_methods": list_balance_methods(),
+        "models": list_models(),
     }
 
 
@@ -505,8 +514,15 @@ def validate_models(session_id: str, body: ValidationRequest):
         if c != session.target and not str(c).endswith("_binned") and "id" not in str(c).lower()
     ]
     try:
-        result = run_model_validation(
-            session.df, session.target, features, body.test_size, body.cv_folds
+        result = run_model_suite(
+            session.df,
+            session.target,
+            features,
+            models=body.models,
+            balance_methods=body.balance_methods,
+            test_size=body.test_size,
+            cv_folds=body.cv_folds,
+            run_all_combinations=body.run_all_combinations,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
