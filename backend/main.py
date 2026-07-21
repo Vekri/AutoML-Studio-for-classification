@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ from modules.feature_selection import (  # noqa: E402
     random_forest_importance,
     run_feature_selection,
 )
-from modules.validation import run_model_validation, validate_dataset  # noqa: E402
+from modules.validation import compute_quality_score, run_model_validation, validate_dataset  # noqa: E402
 from modules.balancing import list_balance_methods  # noqa: E402
 from modules.modeling import (  # noqa: E402
     find_combination,
@@ -42,6 +43,23 @@ from modules.modeling import (  # noqa: E402
     run_model_suite,
     select_best_from_leaderboard,
 )
+from modules.profiling import profile_dataframe  # noqa: E402
+from modules.outliers import (  # noqa: E402
+    apply_outlier_treatment,
+    detect_outliers,
+    list_outlier_methods,
+)
+from modules.encoding import apply_encoding, recommend_encoding  # noqa: E402
+from modules.scaling import apply_scaling, recommend_scaling  # noqa: E402
+from modules.feature_eng import (  # noqa: E402
+    apply_variable_reduction,
+    engineer_features,
+    reduce_variables,
+)
+from modules.tuning import tune_selected_algorithm  # noqa: E402
+from modules.explain import explain_selected_algorithm  # noqa: E402
+from modules.insights import generate_business_insights  # noqa: E402
+from modules.report import build_executive_report_html  # noqa: E402
 
 from backend.session_store import create_session, delete_session, get_session  # noqa: E402
 
@@ -109,6 +127,44 @@ class AutoSelectRequest(BaseModel):
     selection_metric: str = "auc_roc"
 
 
+class OutlierRequest(BaseModel):
+    method: str = "iqr"
+    mode: str = "cap"  # cap | drop_rows | detect
+    z_threshold: float = 3.0
+    contamination: float = 0.05
+
+
+class EncodingRequest(BaseModel):
+    apply: bool = False
+
+
+class ScalingRequest(BaseModel):
+    apply: bool = False
+    algorithm_hint: str | None = None
+
+
+class FeatureEngRequest(BaseModel):
+    max_interactions: int = 5
+    include_datetime: bool = True
+
+
+class ReduceRequest(BaseModel):
+    corr_threshold: float = 0.92
+    run_pca: bool = True
+    apply_drops: bool = False
+    drop_columns: list[str] = Field(default_factory=list)
+
+
+class TuneRequest(BaseModel):
+    selection_metric: str = "auc_roc"
+    n_iter: int = 20
+    cv_folds: int = 3
+
+
+class ExplainRequest(BaseModel):
+    top_k: int = 15
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -147,6 +203,12 @@ def _session_payload(session) -> dict[str, Any]:
         "has_cleaning": bool(session.cleaning_config),
         "has_binning": bool(session.binning_config),
         "selected_algorithm": session.selected_algorithm or None,
+        "quality_score": session.quality_score or None,
+        "has_encoding": bool(session.encoding_config),
+        "has_scaling": bool(session.scaling_config),
+        "has_feature_eng": bool(session.feature_eng_config),
+        "has_explanation": bool(session.explanation),
+        "has_tuning": bool(session.tuning_result),
     }
 
 
@@ -182,6 +244,7 @@ def domains():
         "feature_selection_methods": FEATURE_SELECTION_METHODS,
         "balance_methods": list_balance_methods(),
         "models": list_models(),
+        "outlier_methods": list_outlier_methods(),
     }
 
 
@@ -213,12 +276,16 @@ async def upload_csv(
     session = create_session(df, filename=file.filename or "dataset.csv", domain=domain)
     suggested = suggest_target_column(df, PROBLEM_DOMAINS[domain]["common_targets"])
     summary = get_column_summary(df)
+    session.profile = _json_safe(profile_dataframe(df, suggested))
+    session.quality_score = _json_safe(compute_quality_score(df, suggested))
     return {
         **_session_payload(session),
         "suggested_target": suggested,
         "column_summary": _json_safe(summary.to_dict(orient="records")),
         "missing_cells": int(df.isna().sum().sum()),
         "duplicates": int(df.duplicated().sum()),
+        "profile": session.profile,
+        "quality_score": session.quality_score,
     }
 
 
@@ -234,12 +301,16 @@ def load_sample(domain: str = "Banking"):
     session.target = "default"
     session.processed_df = df.copy()
     summary = get_column_summary(df)
+    session.profile = _json_safe(profile_dataframe(df, "default"))
+    session.quality_score = _json_safe(compute_quality_score(df, "default"))
     return {
         **_session_payload(session),
         "suggested_target": "default",
         "column_summary": _json_safe(summary.to_dict(orient="records")),
         "missing_cells": int(df.isna().sum().sum()),
         "duplicates": int(df.duplicated().sum()),
+        "profile": session.profile,
+        "quality_score": session.quality_score,
     }
 
 
@@ -334,6 +405,8 @@ def apply_cleaning_endpoint(session_id: str, body: CleaningApply):
         cleaned, config = apply_cleaning(df, target, actionable)
     session.processed_df = cleaned
     session.cleaning_config = config
+    session.profile = _json_safe(profile_dataframe(cleaned, target))
+    session.quality_score = _json_safe(compute_quality_score(cleaned, target))
     return {**_session_payload(session), "cleaning_config": _json_safe(config)}
 
 
@@ -518,7 +591,12 @@ def validate_data(session_id: str):
     ]
     report = validate_dataset(session.df, session.target, features)
     session.validation_report = _json_safe(report)
-    return {"report": session.validation_report, "features_used": features}
+    session.quality_score = _json_safe(compute_quality_score(session.df, session.target, features))
+    return {
+        "report": session.validation_report,
+        "quality_score": session.quality_score,
+        "features_used": features,
+    }
 
 
 @app.post("/api/session/{session_id}/validate/models")
@@ -599,6 +677,252 @@ def get_selected_algorithm(session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Profiling / quality / prep pipeline
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/session/{session_id}/profile")
+def get_profile(session_id: str, refresh: bool = False):
+    session = _require_session(session_id)
+    if refresh or not session.profile:
+        session.profile = _json_safe(profile_dataframe(session.df, session.target))
+    return {"profile": session.profile, **_session_payload(session)}
+
+
+@app.get("/api/session/{session_id}/quality-score")
+def get_quality_score(session_id: str, refresh: bool = True):
+    session = _require_session(session_id)
+    if refresh or not session.quality_score:
+        session.quality_score = _json_safe(
+            compute_quality_score(session.df, session.target, session.selected_features or None)
+        )
+    return {"quality_score": session.quality_score, **_session_payload(session)}
+
+
+@app.post("/api/session/{session_id}/outliers")
+def outliers_endpoint(session_id: str, body: OutlierRequest):
+    session = _require_session(session_id)
+    target = session.target if isinstance(session.target, str) else None
+    try:
+        if body.mode == "detect":
+            report = detect_outliers(
+                session.df,
+                target=target,
+                method=body.method,
+                z_threshold=body.z_threshold,
+                contamination=body.contamination,
+            )
+            session.outlier_report = _json_safe(report)
+            return {"report": session.outlier_report, **_session_payload(session)}
+        result_df, config = apply_outlier_treatment(
+            session.df,
+            target=target,
+            method=body.method,
+            mode=body.mode,
+            z_threshold=body.z_threshold,
+            contamination=body.contamination,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.processed_df = result_df
+    session.outlier_report = _json_safe(config)
+    session.cleaning_config = {
+        **(session.cleaning_config or {}),
+        "outlier_treatment": config,
+    }
+    session.profile = _json_safe(profile_dataframe(result_df, target))
+    session.quality_score = _json_safe(compute_quality_score(result_df, target))
+    return {"report": session.outlier_report, **_session_payload(session)}
+
+
+@app.post("/api/session/{session_id}/encoding")
+def encoding_endpoint(session_id: str, body: EncodingRequest):
+    session = _require_session(session_id)
+    target = session.target if isinstance(session.target, str) else None
+    recs = recommend_encoding(session.df, target)
+    if not body.apply:
+        return {"recommendations": _json_safe(recs), **_session_payload(session)}
+    try:
+        result_df, config = apply_encoding(session.df, target)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.processed_df = result_df
+    session.encoding_config = _json_safe(config)
+    session.profile = _json_safe(profile_dataframe(result_df, target))
+    return {
+        "recommendations": _json_safe(recs),
+        "config": session.encoding_config,
+        **_session_payload(session),
+    }
+
+
+@app.post("/api/session/{session_id}/scaling")
+def scaling_endpoint(session_id: str, body: ScalingRequest):
+    session = _require_session(session_id)
+    target = session.target if isinstance(session.target, str) else None
+    hint = body.algorithm_hint or (session.selected_algorithm or {}).get("model_id")
+    recs = recommend_scaling(session.df, target, algorithm_hint=hint)
+    if not body.apply:
+        return {"recommendations": _json_safe(recs), **_session_payload(session)}
+    try:
+        result_df, config = apply_scaling(session.df, target, algorithm_hint=hint)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.processed_df = result_df
+    session.scaling_config = _json_safe(config)
+    return {
+        "recommendations": _json_safe(recs),
+        "config": session.scaling_config,
+        **_session_payload(session),
+    }
+
+
+@app.post("/api/session/{session_id}/feature-eng")
+def feature_eng_endpoint(session_id: str, body: FeatureEngRequest):
+    session = _require_session(session_id)
+    target = session.target if isinstance(session.target, str) else None
+    try:
+        result_df, config = engineer_features(
+            session.df,
+            target=target,
+            max_interactions=body.max_interactions,
+            include_datetime=body.include_datetime,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.processed_df = result_df
+    session.feature_eng_config = _json_safe(config)
+    return {"config": session.feature_eng_config, **_session_payload(session)}
+
+
+@app.post("/api/session/{session_id}/reduce")
+def reduce_endpoint(session_id: str, body: ReduceRequest):
+    session = _require_session(session_id)
+    target = session.target if isinstance(session.target, str) else None
+    analysis = reduce_variables(
+        session.df,
+        target=target,
+        corr_threshold=body.corr_threshold,
+        run_pca=body.run_pca,
+    )
+    session.reduction_config = _json_safe(analysis)
+    if body.apply_drops:
+        drops = body.drop_columns or [d["drop"] for d in analysis.get("drop_suggestions") or []]
+        result_df, applied = apply_variable_reduction(session.df, drops, target=target)
+        session.processed_df = result_df
+        session.reduction_config = _json_safe({**analysis, "applied": applied})
+    return {"reduction": session.reduction_config, **_session_payload(session)}
+
+
+@app.post("/api/session/{session_id}/tune")
+def tune_endpoint(session_id: str, body: TuneRequest):
+    session = _require_session(session_id)
+    if not isinstance(session.target, str):
+        raise HTTPException(status_code=400, detail="Select a target first")
+    features = session.selected_features or [
+        c
+        for c in session.df.columns
+        if c != session.target and not str(c).endswith("_binned") and "id" not in str(c).lower()
+    ]
+    try:
+        result = tune_selected_algorithm(
+            session.df,
+            session.target,
+            features,
+            session.selected_algorithm,
+            selection_metric=body.selection_metric,
+            n_iter=body.n_iter,
+            cv_folds=body.cv_folds,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.tuning_result = _json_safe(result)
+    if session.selected_algorithm and result.get("best_params"):
+        session.selected_algorithm = {
+            **session.selected_algorithm,
+            "tuned_params": result.get("best_params"),
+            "tuned_score": result.get("best_score"),
+        }
+    return {"tuning": session.tuning_result, "selected_algorithm": session.selected_algorithm or None}
+
+
+@app.post("/api/session/{session_id}/explain")
+def explain_endpoint(session_id: str, body: ExplainRequest):
+    session = _require_session(session_id)
+    if not isinstance(session.target, str):
+        raise HTTPException(status_code=400, detail="Select a target first")
+    features = session.selected_features or [
+        c
+        for c in session.df.columns
+        if c != session.target and not str(c).endswith("_binned") and "id" not in str(c).lower()
+    ]
+    try:
+        result = explain_selected_algorithm(
+            session.df,
+            session.target,
+            features,
+            session.selected_algorithm,
+            top_k=body.top_k,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.explanation = _json_safe(result)
+    return {"explanation": session.explanation}
+
+
+@app.get("/api/session/{session_id}/insights")
+def insights_endpoint(session_id: str):
+    session = _require_session(session_id)
+    if not isinstance(session.target, str):
+        raise HTTPException(status_code=400, detail="Select a target first")
+    if not session.profile:
+        session.profile = _json_safe(profile_dataframe(session.df, session.target))
+    if not session.quality_score:
+        session.quality_score = _json_safe(compute_quality_score(session.df, session.target))
+    insights = generate_business_insights(
+        domain=session.domain,
+        target=session.target,
+        profile=session.profile,
+        quality_score=session.quality_score,
+        feature_selection=session.feature_selection_result,
+        selected_algorithm=session.selected_algorithm,
+        explanation=session.explanation,
+        model_validation=session.model_validation,
+        binning_config=session.binning_config,
+    )
+    session.insights = _json_safe(insights)
+    return {"insights": session.insights}
+
+
+@app.get("/api/session/{session_id}/report.html")
+def report_html_endpoint(session_id: str):
+    session = _require_session(session_id)
+    if not isinstance(session.target, str):
+        raise HTTPException(status_code=400, detail="Select a target first")
+    if not session.insights:
+        insights_endpoint(session_id)
+    html = build_executive_report_html(
+        domain=session.domain,
+        target=session.target,
+        profile=session.profile,
+        quality_score=session.quality_score,
+        insights=session.insights,
+        selected_algorithm=session.selected_algorithm,
+        explanation=session.explanation,
+        model_validation=session.model_validation,
+        tuning_result=session.tuning_result,
+        encoding_config=session.encoding_config,
+        scaling_config=session.scaling_config,
+    )
+    session.report_html = html
+    return StreamingResponse(
+        io.BytesIO(html.encode("utf-8")),
+        media_type="text/html",
+        headers={"Content-Disposition": "attachment; filename=executive_report.html"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
 
@@ -614,6 +938,23 @@ def export_zip(session_id: str):
         for c in df.columns
         if c != session.target and not str(c).endswith("_binned") and "id" not in str(c).lower()
     ]
+    if not session.insights:
+        insights_endpoint(session_id)
+    if not session.report_html:
+        session.report_html = build_executive_report_html(
+            domain=session.domain,
+            target=session.target,
+            profile=session.profile,
+            quality_score=session.quality_score,
+            insights=session.insights,
+            selected_algorithm=session.selected_algorithm,
+            explanation=session.explanation,
+            model_validation=session.model_validation,
+            tuning_result=session.tuning_result,
+            encoding_config=session.encoding_config,
+            scaling_config=session.scaling_config,
+        )
+
     manifest = build_studio_manifest(
         domain=session.domain,
         target=session.target,
@@ -627,7 +968,28 @@ def export_zip(session_id: str):
         },
         selected_algorithm=session.selected_algorithm,
         model_validation=session.model_validation,
+        profile=session.profile,
+        quality_score=session.quality_score,
+        encoding_config=session.encoding_config,
+        scaling_config=session.scaling_config,
+        feature_eng_config=session.feature_eng_config,
+        reduction_config=session.reduction_config,
+        tuning_result=session.tuning_result,
+        explanation=session.explanation,
+        insights=session.insights,
     )
+    extra = {
+        "profile.json": json.dumps(session.profile or {}, indent=2, default=str),
+        "quality_score.json": json.dumps(session.quality_score or {}, indent=2, default=str),
+        "encoding_config.json": json.dumps(session.encoding_config or {}, indent=2, default=str),
+        "scaling_config.json": json.dumps(session.scaling_config or {}, indent=2, default=str),
+        "feature_eng_config.json": json.dumps(session.feature_eng_config or {}, indent=2, default=str),
+        "reduction_config.json": json.dumps(session.reduction_config or {}, indent=2, default=str),
+        "explanation.json": json.dumps(session.explanation or {}, indent=2, default=str),
+        "insights.json": json.dumps(session.insights or {}, indent=2, default=str),
+        "tuning_result.json": json.dumps(session.tuning_result or {}, indent=2, default=str),
+        "executive_report.html": session.report_html or "",
+    }
     data = export_zip_bundle(
         df=df,
         manifest=manifest,
@@ -637,6 +999,7 @@ def export_zip(session_id: str):
         validation_report=session.validation_report,
         feature_selection_results=manifest["feature_selection"],
         domain=session.domain,
+        extra_files=extra,
     )
     return StreamingResponse(
         io.BytesIO(data),
@@ -668,6 +1031,15 @@ def export_manifest(session_id: str):
         },
         selected_algorithm=session.selected_algorithm,
         model_validation=session.model_validation,
+        profile=session.profile,
+        quality_score=session.quality_score,
+        encoding_config=session.encoding_config,
+        scaling_config=session.scaling_config,
+        feature_eng_config=session.feature_eng_config,
+        reduction_config=session.reduction_config,
+        tuning_result=session.tuning_result,
+        explanation=session.explanation,
+        insights=session.insights,
     )
     return _json_safe(manifest)
 

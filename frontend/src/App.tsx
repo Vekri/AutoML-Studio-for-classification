@@ -70,6 +70,15 @@ export default function App() {
 
   // Step 3
   const [recs, setRecs] = useState<Record<string, unknown>[]>([]);
+  const [cleanTab, setCleanTab] = useState<"missing" | "outliers" | "duplicates" | "encoding" | "scaling">(
+    "missing"
+  );
+  const [outlierMethod, setOutlierMethod] = useState("iqr");
+  const [outlierReport, setOutlierReport] = useState<Record<string, unknown> | null>(null);
+  const [encodingRecs, setEncodingRecs] = useState<Record<string, unknown> | null>(null);
+  const [scalingRecs, setScalingRecs] = useState<Record<string, unknown> | null>(null);
+  const [qualityScore, setQualityScore] = useState<Record<string, unknown> | null>(null);
+  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
 
   // Step 4
   const [viz, setViz] = useState<Awaited<ReturnType<typeof api.visualizations>> | null>(null);
@@ -109,9 +118,14 @@ export default function App() {
   const [runAllCombos, setRunAllCombos] = useState(true);
   const [selectionMetric, setSelectionMetric] = useState("auc_roc");
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<Record<string, unknown> | null>(null);
+  const [tuningResult, setTuningResult] = useState<Record<string, unknown> | null>(null);
+  const [explanation, setExplanation] = useState<Record<string, unknown> | null>(null);
+  const [reduction, setReduction] = useState<Record<string, unknown> | null>(null);
+  const [feConfig, setFeConfig] = useState<Record<string, unknown> | null>(null);
 
   // Step 8
   const [manifest, setManifest] = useState<Record<string, unknown> | null>(null);
+  const [insights, setInsights] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     api
@@ -170,6 +184,8 @@ export default function App() {
     const data = await run(() => api.sample(domain), "Sample banking dataset loaded");
     if (!data) return;
     setSession(data);
+    setProfile(data.profile || null);
+    setQualityScore(data.quality_score || null);
     setTarget(data.suggested_target || data.target || "default");
     setSelectedCols(data.columns.filter((c) => c !== (data.suggested_target || "default") && !c.toLowerCase().includes("id")));
     setStep(2);
@@ -180,6 +196,8 @@ export default function App() {
     const data = await run(() => api.upload(file, domain), "CSV uploaded");
     if (!data) return;
     setSession(data);
+    setProfile(data.profile || null);
+    setQualityScore(data.quality_score || null);
     const t = data.suggested_target || data.columns[data.columns.length - 1];
     setTarget(t || "");
     setSelectedCols(data.columns.filter((c) => c !== t));
@@ -234,8 +252,97 @@ export default function App() {
     const data = await run(() => api.applyCleaning(session.session_id, modeClean), "Cleaning applied");
     if (data) {
       setSession(data);
+      setQualityScore(data.quality_score || null);
+      setProfile(data.profile || null);
       await loadCleaning();
     }
+  }
+
+  async function runOutliers(mode: "detect" | "cap" | "drop_rows") {
+    if (!session) return;
+    const data = await run(
+      () => api.outliers(session.session_id, { method: outlierMethod, mode }),
+      mode === "detect" ? "Outliers detected" : "Outlier treatment applied"
+    );
+    if (data) {
+      setOutlierReport(data.report);
+      setSession(data);
+      if (data.quality_score) setQualityScore(data.quality_score);
+    }
+  }
+
+  async function loadEncoding(apply = false) {
+    if (!session) return;
+    const data = await run(
+      () => api.encoding(session.session_id, apply),
+      apply ? "Encoding applied" : "Encoding recommendations ready"
+    );
+    if (data) {
+      setEncodingRecs(data.recommendations);
+      setSession(data);
+    }
+  }
+
+  async function loadScaling(apply = false) {
+    if (!session) return;
+    const data = await run(
+      () => api.scaling(session.session_id, apply),
+      apply ? "Scaling applied" : "Scaling recommendations ready"
+    );
+    if (data) {
+      setScalingRecs(data.recommendations);
+      setSession(data);
+    }
+  }
+
+  async function runFeatureEng() {
+    if (!session) return;
+    const data = await run(() => api.featureEng(session.session_id), "Features engineered");
+    if (data) {
+      setFeConfig(data.config);
+      setSession(data);
+    }
+  }
+
+  async function runReduce(applyDrops = false) {
+    if (!session) return;
+    const data = await run(
+      () =>
+        api.reduce(session.session_id, {
+          corr_threshold: 0.92,
+          run_pca: true,
+          apply_drops: applyDrops,
+        }),
+      applyDrops ? "Correlated variables dropped" : "Reduction analysis ready"
+    );
+    if (data) {
+      setReduction(data.reduction);
+      setSession(data);
+    }
+  }
+
+  async function runTune() {
+    if (!session) return;
+    const data = await run(
+      () => api.tune(session.session_id, { selection_metric: selectionMetric }),
+      "Hyperparameter tuning complete"
+    );
+    if (data) {
+      setTuningResult(data.tuning);
+      if (data.selected_algorithm) setSelectedAlgorithm(data.selected_algorithm);
+    }
+  }
+
+  async function runExplain() {
+    if (!session) return;
+    const data = await run(() => api.explain(session.session_id), "Model explanation ready");
+    if (data) setExplanation(data.explanation);
+  }
+
+  async function loadInsights() {
+    if (!session) return;
+    const data = await run(() => api.insights(session.session_id));
+    if (data) setInsights(data.insights);
   }
 
   async function loadViz() {
@@ -355,7 +462,10 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (step === 8 && session) loadManifest();
+    if (step === 8 && session) {
+      loadManifest();
+      loadInsights();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, session?.session_id]);
 
@@ -515,9 +625,21 @@ export default function App() {
               </div>
             </div>
             <div>
-              <p className="panel-title">Dataset overview</p>
+              <p className="panel-title">Data profiling</p>
               {session ? (
                 <div className="split-stack">
+                  {qualityScore && (
+                    <div className="metric" style={{ marginBottom: "0.5rem" }}>
+                      <div className="label">Data quality score</div>
+                      <div className="value">
+                        {String(qualityScore.score)}
+                        <span style={{ fontSize: "1rem", color: "var(--muted)" }}>
+                          {" "}
+                          / 100 · grade {String(qualityScore.grade)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   <div className="grid-2">
                     <div className="metric">
                       <div className="label">Rows</div>
@@ -528,14 +650,26 @@ export default function App() {
                       <div className="value">{session.columns.length}</div>
                     </div>
                     <div className="metric">
-                      <div className="label">Missing</div>
-                      <div className="value">{session.missing_cells ?? 0}</div>
+                      <div className="label">Missing %</div>
+                      <div className="value">
+                        {String(profile?.missing_pct ?? session.missing_cells ?? 0)}
+                      </div>
                     </div>
                     <div className="metric">
                       <div className="label">Duplicates</div>
-                      <div className="value">{session.duplicates ?? 0}</div>
+                      <div className="value">
+                        {String(profile?.duplicate_rows ?? session.duplicates ?? 0)}
+                      </div>
                     </div>
                   </div>
+                  {!!(profile?.warnings as string[] | undefined)?.length && (
+                    <div className="rec">
+                      <h4>Profile warnings</h4>
+                      {(profile?.warnings as string[]).map((w, i) => (
+                        <p key={i}>{w}</p>
+                      ))}
+                    </div>
+                  )}
                   <PreviewTable rows={session.preview} />
                 </div>
               ) : (
@@ -622,35 +756,192 @@ export default function App() {
 
         {step === 3 && session && (
           <div className="panel">
-            <div className="btn-row" style={{ marginTop: 0 }}>
-              <button className="primary" disabled={busy} onClick={() => applyClean("auto")}>
-                Auto-clean (safe)
-              </button>
-              <button className="secondary" disabled={busy} onClick={() => applyClean("all")}>
-                Apply all recommendations
-              </button>
+            {qualityScore && (
+              <div className="success" style={{ marginBottom: "1rem" }}>
+                Quality score: <strong>{String(qualityScore.score)}/100 ({String(qualityScore.grade)})</strong>
+                {(qualityScore.issues as string[] | undefined)?.length
+                  ? ` — ${(qualityScore.issues as string[]).slice(0, 2).join("; ")}`
+                  : ""}
+              </div>
+            )}
+            <div className="tabs">
+              {(
+                [
+                  ["missing", "Missing"],
+                  ["outliers", "Outliers"],
+                  ["duplicates", "Duplicates"],
+                  ["encoding", "Encoding"],
+                  ["scaling", "Scaling"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  className={`tab ${cleanTab === id ? "active" : ""}`}
+                  onClick={() => {
+                    setCleanTab(id);
+                    if (id === "encoding") loadEncoding(false);
+                    if (id === "scaling") loadScaling(false);
+                    if (id === "outliers") runOutliers("detect");
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <div style={{ marginTop: "1rem" }}>
-              {recs.length === 0 ? (
-                <div className="success">No major cleaning issues detected.</div>
-              ) : (
-                recs.map((r, i) => (
-                  <div className="rec" key={i}>
-                    <h4>
-                      <span
-                        className={`badge ${
-                          r.severity === "high" ? "danger" : r.severity === "medium" ? "warn" : "ok"
-                        }`}
-                      >
-                        {String(r.severity)}
-                      </span>{" "}
-                      [{String(r.category)}] {String(r.issue)}
-                    </h4>
-                    <p>{String(r.recommendation)}</p>
+
+            {cleanTab === "missing" && (
+              <>
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="primary" disabled={busy} onClick={() => applyClean("auto")}>
+                    Auto-clean (safe)
+                  </button>
+                  <button className="secondary" disabled={busy} onClick={() => applyClean("all")}>
+                    Apply all recommendations
+                  </button>
+                </div>
+                <div style={{ marginTop: "1rem" }}>
+                  {recs.filter((r) => r.category === "missing_values" || r.category === "target").length ===
+                  0 ? (
+                    <div className="success">No missing-value issues detected.</div>
+                  ) : (
+                    recs
+                      .filter((r) => r.category === "missing_values" || r.category === "target")
+                      .map((r, i) => (
+                        <div className="rec" key={i}>
+                          <h4>
+                            <span
+                              className={`badge ${
+                                r.severity === "high"
+                                  ? "danger"
+                                  : r.severity === "medium"
+                                    ? "warn"
+                                    : "ok"
+                              }`}
+                            >
+                              {String(r.severity)}
+                            </span>{" "}
+                            {String(r.issue)}
+                          </h4>
+                          <p>
+                            {String(r.recommendation)}
+                            {r.strategy ? ` · strategy=${String(r.strategy)}` : ""}
+                          </p>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </>
+            )}
+
+            {cleanTab === "outliers" && (
+              <>
+                <div className="field">
+                  <label>Detection method</label>
+                  <select value={outlierMethod} onChange={(e) => setOutlierMethod(e.target.value)}>
+                    <option value="iqr">IQR (1.5×)</option>
+                    <option value="zscore">Z-Score</option>
+                    <option value="isolation_forest">Isolation Forest</option>
+                  </select>
+                </div>
+                <div className="btn-row">
+                  <button className="secondary" disabled={busy} onClick={() => runOutliers("detect")}>
+                    Detect
+                  </button>
+                  <button className="primary" disabled={busy} onClick={() => runOutliers("cap")}>
+                    Cap outliers
+                  </button>
+                  <button className="secondary" disabled={busy} onClick={() => runOutliers("drop_rows")}>
+                    Drop outlier rows
+                  </button>
+                </div>
+                {outlierReport && (
+                  <pre className="mono" style={{ fontSize: "0.8rem", whiteSpace: "pre-wrap" }}>
+                    {JSON.stringify(outlierReport, null, 2)}
+                  </pre>
+                )}
+              </>
+            )}
+
+            {cleanTab === "duplicates" && (
+              <>
+                <div className="grid-2">
+                  <div className="metric">
+                    <div className="label">Duplicate rows</div>
+                    <div className="value">
+                      {String(profile?.duplicate_rows ?? session.duplicates ?? 0)}
+                    </div>
                   </div>
-                ))
-              )}
-            </div>
+                  <div className="metric">
+                    <div className="label">Duplicate %</div>
+                    <div className="value">{String(profile?.duplicate_pct ?? 0)}</div>
+                  </div>
+                </div>
+                <div className="btn-row">
+                  <button className="primary" disabled={busy} onClick={() => applyClean("auto")}>
+                    Drop duplicates (via auto-clean)
+                  </button>
+                </div>
+                {recs
+                  .filter((r) => r.category === "duplicates")
+                  .map((r, i) => (
+                    <div className="rec" key={i}>
+                      <h4>{String(r.issue)}</h4>
+                      <p>{String(r.recommendation)}</p>
+                    </div>
+                  ))}
+              </>
+            )}
+
+            {cleanTab === "encoding" && (
+              <>
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="secondary" disabled={busy} onClick={() => loadEncoding(false)}>
+                    Refresh recommendations
+                  </button>
+                  <button className="primary" disabled={busy} onClick={() => loadEncoding(true)}>
+                    Apply encoding
+                  </button>
+                </div>
+                {encodingRecs && (
+                  <PreviewTable
+                    rows={
+                      ((encodingRecs.recommendations as Record<string, unknown>[]) || []).map((r) => ({
+                        column: r.column,
+                        method: r.method,
+                        n_unique: r.n_unique,
+                        reason: r.reason,
+                      }))
+                    }
+                  />
+                )}
+              </>
+            )}
+
+            {cleanTab === "scaling" && (
+              <>
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="secondary" disabled={busy} onClick={() => loadScaling(false)}>
+                    Refresh recommendations
+                  </button>
+                  <button className="primary" disabled={busy} onClick={() => loadScaling(true)}>
+                    Apply scaling
+                  </button>
+                </div>
+                {scalingRecs && (
+                  <PreviewTable
+                    rows={
+                      ((scalingRecs.recommendations as Record<string, unknown>[]) || []).map((r) => ({
+                        column: r.column,
+                        method: r.method,
+                        skew: r.skew,
+                        reason: r.reason,
+                      }))
+                    }
+                  />
+                )}
+              </>
+            )}
+
             <PreviewTable rows={session.preview} />
           </div>
         )}
@@ -837,7 +1128,42 @@ export default function App() {
               <button className="secondary" disabled={busy} onClick={runRf}>
                 RF importance
               </button>
+              <button className="secondary" disabled={busy} onClick={runFeatureEng}>
+                Feature engineering
+              </button>
+              <button className="secondary" disabled={busy} onClick={() => runReduce(false)}>
+                Variable reduction
+              </button>
+              <button className="secondary" disabled={busy} onClick={() => runReduce(true)}>
+                Drop high-corr pairs
+              </button>
             </div>
+            {feConfig && (
+              <div className="success" style={{ marginTop: "0.75rem" }}>
+                Engineered {String(feConfig.n_created)} features
+                {Array.isArray(feConfig.created)
+                  ? `: ${(feConfig.created as string[]).slice(0, 6).join(", ")}`
+                  : ""}
+              </div>
+            )}
+            {reduction && (
+              <div className="rec" style={{ marginTop: "0.75rem" }}>
+                <h4>Variable reduction</h4>
+                <p>
+                  Drop suggestions: {String(reduction.n_drop_suggestions)} · PCA components for 95%
+                  var:{" "}
+                  {String(
+                    (reduction.pca as Record<string, unknown> | undefined)
+                      ?.components_for_target_variance ?? "—"
+                  )}
+                </p>
+                {!!(reduction.drop_suggestions as Record<string, unknown>[] | undefined)?.length && (
+                  <PreviewTable
+                    rows={(reduction.drop_suggestions as Record<string, unknown>[]).slice(0, 12)}
+                  />
+                )}
+              </div>
+            )}
             {!!fsResult.length && scoreKey && (
               <div className="chart-box" style={{ marginTop: "1rem", height: 360 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -1045,6 +1371,51 @@ export default function App() {
               </div>
             )}
 
+            <div className="btn-row">
+              <button className="secondary" disabled={busy || !selectedAlgorithm} onClick={runTune}>
+                Tune hyperparameters
+              </button>
+              <button className="secondary" disabled={busy || !selectedAlgorithm} onClick={runExplain}>
+                Explain model
+              </button>
+            </div>
+            {tuningResult && (
+              <div className="rec">
+                <h4>Hyperparameter tuning — {String(tuningResult.model_label)}</h4>
+                <p>
+                  Status {String(tuningResult.status)} · best score {String(tuningResult.best_score)} ·
+                  metric {String(tuningResult.selection_metric)}
+                </p>
+                <pre className="mono" style={{ fontSize: "0.78rem", whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(tuningResult.best_params || {}, null, 2)}
+                </pre>
+              </div>
+            )}
+            {explanation && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <p className="panel-title">
+                  Model explanation ({String(explanation.method)})
+                </p>
+                <div className="chart-box" style={{ height: 280 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={[...((explanation.importances as Record<string, unknown>[]) || [])]
+                        .slice(0, 12)
+                        .reverse()}
+                      layout="vertical"
+                      margin={{ left: 110 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" />
+                      <YAxis type="category" dataKey="feature" width={110} />
+                      <Tooltip />
+                      <Bar dataKey="importance" fill="#0d9488" radius={[0, 6, 6, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {modelResult && (
               <div style={{ marginTop: "1.25rem" }}>
                 <div className="btn-row" style={{ marginTop: 0 }}>
@@ -1136,8 +1507,10 @@ export default function App() {
                 <div className="value">{session.selected_features?.length || session.columns.length - 1}</div>
               </div>
               <div className="metric">
-                <div className="label">Rows</div>
-                <div className="value">{session.rows}</div>
+                <div className="label">Quality</div>
+                <div className="value" style={{ fontSize: "1rem" }}>
+                  {qualityScore ? `${String(qualityScore.score)} (${String(qualityScore.grade)})` : "—"}
+                </div>
               </div>
             </div>
             {selectedAlgorithm ? (
@@ -1149,15 +1522,54 @@ export default function App() {
               </div>
             ) : (
               <div className="error" style={{ marginTop: "1rem" }}>
-                No algorithm selected yet — run Step 7 (Balance & Models) to pick the best model.
+                No algorithm selected yet — run Step 7 to pick the best model.
               </div>
             )}
+
+            {insights && (
+              <div style={{ marginTop: "1rem" }}>
+                <p className="panel-title">Business insights</p>
+                <div className="rec">
+                  <h4>Summary</h4>
+                  {(insights.summary_bullets as string[] | undefined)?.map((b, i) => (
+                    <p key={i}>{b}</p>
+                  ))}
+                </div>
+                {!!(insights.risks as string[] | undefined)?.length && (
+                  <div className="rec">
+                    <h4>Risks</h4>
+                    {(insights.risks as string[]).map((b, i) => (
+                      <p key={i}>{b}</p>
+                    ))}
+                  </div>
+                )}
+                {!!(insights.opportunities as string[] | undefined)?.length && (
+                  <div className="rec">
+                    <h4>Opportunities</h4>
+                    {(insights.opportunities as string[]).map((b, i) => (
+                      <p key={i}>{b}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="btn-row">
               <a className="primary" href={api.exportUrl(session.session_id)} style={{ textDecoration: "none" }}>
                 Download ZIP for Predictions Studio
               </a>
+              <a
+                className="secondary"
+                href={api.reportUrl(session.session_id)}
+                style={{ textDecoration: "none" }}
+              >
+                Download executive report (HTML)
+              </a>
               <button className="secondary" onClick={loadManifest}>
                 Refresh manifest
+              </button>
+              <button className="secondary" onClick={loadInsights}>
+                Refresh insights
               </button>
             </div>
             {manifest && (
