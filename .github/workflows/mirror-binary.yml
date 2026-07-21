@@ -1,0 +1,24 @@
+name: Mirror to Binary-Classification
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.BINARY_REPO_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Vekri/Binary-Classification
+        env:
+          TOKEN: ${{ secrets.BINARY_REPO_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add binary https://x-access-token:${TOKEN}@github.com/Vekri/Binary-Classification.git
+          git push binary HEAD:main --force
