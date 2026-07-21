@@ -12,31 +12,30 @@ short_description: Free AutoML for binary classification — React + FastAPI
 
 # IntelliPredict AI — Binary Classification
 
-**Free & open-source** · React + FastAPI · Landing page + AutoML studio
+**Repository:** [Vekri/Binary-Classification](https://github.com/Vekri/Binary-Classification)  
+**Live target:** https://intellipredict-web.onrender.com
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Vekri/AutoML-Studio-for-classification)
+Full-stack no-code AutoML for binary classification — landing page, project dashboard, and 8-step pipeline.
 
-**Target URL:** https://intellipredict-web.onrender.com (Render service `intellipredict-web`)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Vekri/Binary-Classification)
 
 ## Routes
 
 | Path | Page |
 |------|------|
-| `/` | Marketing landing (like intellipredict-web.onrender.com) |
-| `/studio` | Full AutoML pipeline workspace |
-| `/dashboard` | Redirects to `/studio` |
+| `/` | Marketing landing |
+| `/dashboard/projects` | Create & manage projects (templates like churn, fraud, credit approval) |
+| `/dashboard/upload` … `/dashboard/deploy` | Pipeline steps inside dashboard shell |
+| `/studio` | Standalone studio (legacy) |
 
 ## Deploy on Render
 
-1. **[dashboard.render.com](https://dashboard.render.com)** → **New +** → **Blueprint**
-2. Connect repo `Vekri/AutoML-Studio-for-classification` → **Apply**
-3. Uses `render.yaml` → service name `intellipredict-web`
-4. Open your `*.onrender.com` URL
+1. https://dashboard.render.com → **New +** → **Blueprint**
+2. Connect **Vekri/Binary-Classification** → **Apply**
+3. Service: `intellipredict-web` → https://intellipredict-web.onrender.com
 
-Or one-click: use the Deploy to Render button above.
-
-Build command: `pip install -r backend/requirements.txt`  
-Start command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+Build: `pip install -r backend/requirements.txt`  
+Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
 
 ## Local
 

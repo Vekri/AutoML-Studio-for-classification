@@ -62,10 +62,10 @@ export default function LandingPage() {
           <a href="#security">Security</a>
         </nav>
         <div className="landing-header-actions">
-          <Link to="/studio" className="landing-link-btn">
+          <Link to="/dashboard/projects" className="landing-link-btn">
             Sign in
           </Link>
-          <Link to="/studio" className="landing-cta-btn">
+          <Link to="/dashboard/projects" className="landing-cta-btn">
             Start building →
           </Link>
         </div>
@@ -86,10 +86,10 @@ export default function LandingPage() {
               No notebooks, infrastructure, or ML team required.
             </p>
             <div className="landing-hero-actions">
-              <Link to="/studio" className="landing-primary-btn">
+              <Link to="/dashboard/projects" className="landing-primary-btn">
                 Build your first model →
               </Link>
-              <Link to="/studio" className="landing-secondary-btn">
+              <Link to="/dashboard/projects" className="landing-secondary-btn">
                 Explore the platform
               </Link>
             </div>
@@ -188,7 +188,7 @@ export default function LandingPage() {
               <p className="section-kicker cyan">Simple by design</p>
               <h2>A clear path from question to production.</h2>
               <p>IntelliPredict handles the complexity behind the scenes while keeping every important decision visible.</p>
-              <Link to="/studio" className="landing-inline-link">Start with your data →</Link>
+              <Link to="/dashboard/projects" className="landing-inline-link">Start with your data →</Link>
             </div>
             <div className="landing-steps">
               {STEPS.map((s) => (
@@ -220,7 +220,7 @@ export default function LandingPage() {
         <section className="landing-final-cta">
           <h2>Your next model starts here.</h2>
           <p>Upload your data today and turn a business question into a deployed prediction bundle.</p>
-          <Link to="/studio" className="landing-primary-btn light">Get started for free →</Link>
+          <Link to="/dashboard/projects" className="landing-primary-btn light">Get started for free →</Link>
         </section>
       </main>
 
@@ -229,7 +229,7 @@ export default function LandingPage() {
         <p>© 2026 IntelliPredict AI. Built to make machine learning accessible.</p>
         <div className="landing-footer-links">
           <a href="#platform">Platform</a>
-          <Link to="/studio">Studio</Link>
+          <Link to="/dashboard/projects">Studio</Link>
         </div>
       </footer>
     </div>

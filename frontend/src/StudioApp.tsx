@@ -50,13 +50,27 @@ function PreviewTable({ rows }: { rows: Record<string, unknown>[] }) {
   );
 }
 
-export default function StudioApp() {
-  const [step, setStep] = useState(1);
+export default function StudioApp({
+  embedded = false,
+  initialStep = 1,
+  projectId,
+  projectName,
+  domain: domainProp,
+  loadSampleOnStart = false,
+}: {
+  embedded?: boolean;
+  initialStep?: number;
+  projectId?: string;
+  projectName?: string;
+  domain?: string;
+  loadSampleOnStart?: boolean;
+} = {}) {
+  const [step, setStep] = useState(initialStep);
   const [domains, setDomains] = useState<DomainInfo[]>([]);
   const [methods, setMethods] = useState<string[]>([]);
   const [balanceOptions, setBalanceOptions] = useState<BalanceMethod[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
-  const [domain, setDomain] = useState("Banking");
+  const [domain, setDomain] = useState(domainProp || "Banking");
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -160,6 +174,14 @@ export default function StudioApp() {
       .catch((e) => setError(String(e.message || e)));
   }, []);
 
+  useEffect(() => {
+    setStep(initialStep);
+  }, [initialStep]);
+
+  useEffect(() => {
+    if (domainProp) setDomain(domainProp);
+  }, [domainProp]);
+
   const featureOptions = useMemo(() => {
     if (!session) return [];
     return session.columns.filter((c) => c !== target);
@@ -189,8 +211,14 @@ export default function StudioApp() {
     setQualityScore(data.quality_score || null);
     setTarget(data.suggested_target || data.target || "default");
     setSelectedCols(data.columns.filter((c) => c !== (data.suggested_target || "default") && !c.toLowerCase().includes("id")));
-    setStep(2);
+    if (!embedded) setStep(2);
   }
+
+  useEffect(() => {
+    if (!loadSampleOnStart || session) return;
+    loadSample();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadSampleOnStart, projectId]);
 
   async function onUpload(file: File | null) {
     if (!file) return;
@@ -494,7 +522,8 @@ export default function StudioApp() {
   }, [fsResult]);
 
   return (
-    <div className="app-shell">
+    <div className={embedded ? "dash-studio-wrap" : "app-shell"}>
+      {!embedded && (
       <aside className="sidebar">
         <div className="brand">
           <Link to="/" className="brand-mark" style={{ textDecoration: "none", color: "inherit" }}>
@@ -556,8 +585,15 @@ export default function StudioApp() {
           </button>
         </div>
       </aside>
+      )}
 
-      <main className="main" key={step}>
+      <main className={embedded ? "main embedded-main" : "main"} key={step}>
+        {embedded && projectName && (
+          <div className="dash-studio-banner">
+            <h1>{projectName}</h1>
+            <p className="muted">Step {step} of 8 · {STEPS[step - 1].title}</p>
+          </div>
+        )}
         <div className="topbar">
           <div>
             <h2>{STEPS[step - 1].title}</h2>
