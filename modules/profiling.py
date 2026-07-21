@@ -106,14 +106,14 @@ def profile_dataframe(df: pd.DataFrame, target: str | None = None) -> dict[str, 
 
 def _looks_like_datetime(series: pd.Series) -> bool:
     if series.dtype == object:
-    sample = series.dropna().astype(str).head(20)
-    if not len(sample):
-        return False
-    try:
-        parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
-    except (TypeError, ValueError):
-        parsed = pd.to_datetime(sample, errors="coerce")
-    return float(parsed.notna().mean()) > 0.8
+        sample = series.dropna().astype(str).head(20)
+        if not len(sample):
+            return False
+        try:
+            parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
+        except (TypeError, ValueError):
+            parsed = pd.to_datetime(sample, errors="coerce")
+        return float(parsed.notna().mean()) > 0.8
     return False
 
 
