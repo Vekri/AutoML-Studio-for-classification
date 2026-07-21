@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, DomainInfo, SessionPayload } from "./api";
+import { api, BalanceMethod, DomainInfo, ModelOption, SessionPayload } from "./api";
 
 const STEPS = [
   { id: 1, title: "Upload & Domain", blurb: "CSV + business problem" },
@@ -18,7 +18,7 @@ const STEPS = [
   { id: 4, title: "Visualizations", blurb: "Distributions" },
   { id: 5, title: "Binning", blurb: "WoE / IV" },
   { id: 6, title: "Feature Selection", blurb: "Rank & pick" },
-  { id: 7, title: "Validation", blurb: "Quality + models" },
+  { id: 7, title: "Balance & Models", blurb: "Sampling + ML models" },
   { id: 8, title: "Export", blurb: "Predictions Studio" },
 ];
 
@@ -53,6 +53,8 @@ export default function App() {
   const [step, setStep] = useState(1);
   const [domains, setDomains] = useState<DomainInfo[]>([]);
   const [methods, setMethods] = useState<string[]>([]);
+  const [balanceOptions, setBalanceOptions] = useState<BalanceMethod[]>([]);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [domain, setDomain] = useState("Banking");
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +70,15 @@ export default function App() {
 
   // Step 3
   const [recs, setRecs] = useState<Record<string, unknown>[]>([]);
+  const [cleanTab, setCleanTab] = useState<"missing" | "outliers" | "duplicates" | "encoding" | "scaling">(
+    "missing"
+  );
+  const [outlierMethod, setOutlierMethod] = useState("iqr");
+  const [outlierReport, setOutlierReport] = useState<Record<string, unknown> | null>(null);
+  const [encodingRecs, setEncodingRecs] = useState<Record<string, unknown> | null>(null);
+  const [scalingRecs, setScalingRecs] = useState<Record<string, unknown> | null>(null);
+  const [qualityScore, setQualityScore] = useState<Record<string, unknown> | null>(null);
+  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
 
   // Step 4
   const [viz, setViz] = useState<Awaited<ReturnType<typeof api.visualizations>> | null>(null);
@@ -94,9 +105,27 @@ export default function App() {
   const [modelResult, setModelResult] = useState<Record<string, unknown> | null>(null);
   const [testSize, setTestSize] = useState(0.2);
   const [cvFolds, setCvFolds] = useState(5);
+  const [selectedBalances, setSelectedBalances] = useState<string[]>([
+    "none",
+    "class_weight",
+    "smote",
+  ]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([
+    "logistic_regression",
+    "random_forest",
+    "gradient_boosting",
+  ]);
+  const [runAllCombos, setRunAllCombos] = useState(true);
+  const [selectionMetric, setSelectionMetric] = useState("auc_roc");
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<Record<string, unknown> | null>(null);
+  const [tuningResult, setTuningResult] = useState<Record<string, unknown> | null>(null);
+  const [explanation, setExplanation] = useState<Record<string, unknown> | null>(null);
+  const [reduction, setReduction] = useState<Record<string, unknown> | null>(null);
+  const [feConfig, setFeConfig] = useState<Record<string, unknown> | null>(null);
 
   // Step 8
   const [manifest, setManifest] = useState<Record<string, unknown> | null>(null);
+  const [insights, setInsights] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     api
@@ -104,7 +133,28 @@ export default function App() {
       .then((d) => {
         setDomains(d.domains);
         setMethods(d.feature_selection_methods);
-        if (d.feature_selection_methods.length) setFsMethod(d.feature_selection_methods[1] || d.feature_selection_methods[0]);
+        setBalanceOptions(d.balance_methods || []);
+        setModelOptions(d.models || []);
+        if (d.feature_selection_methods.length)
+          setFsMethod(d.feature_selection_methods[1] || d.feature_selection_methods[0]);
+        if (d.balance_methods?.length) {
+          setSelectedBalances(
+            d.balance_methods
+              .map((b) => b.id)
+              .filter((id) => ["none", "class_weight", "smote", "random_oversample"].includes(id))
+          );
+        }
+        if (d.models?.length) {
+          setSelectedModels(
+            d.models
+              .map((m) => m.id)
+              .filter((id) =>
+                ["logistic_regression", "random_forest", "gradient_boosting", "decision_tree"].includes(
+                  id
+                )
+              )
+          );
+        }
       })
       .catch((e) => setError(String(e.message || e)));
   }, []);
@@ -134,6 +184,8 @@ export default function App() {
     const data = await run(() => api.sample(domain), "Sample banking dataset loaded");
     if (!data) return;
     setSession(data);
+    setProfile(data.profile || null);
+    setQualityScore(data.quality_score || null);
     setTarget(data.suggested_target || data.target || "default");
     setSelectedCols(data.columns.filter((c) => c !== (data.suggested_target || "default") && !c.toLowerCase().includes("id")));
     setStep(2);
@@ -144,6 +196,8 @@ export default function App() {
     const data = await run(() => api.upload(file, domain), "CSV uploaded");
     if (!data) return;
     setSession(data);
+    setProfile(data.profile || null);
+    setQualityScore(data.quality_score || null);
     const t = data.suggested_target || data.columns[data.columns.length - 1];
     setTarget(t || "");
     setSelectedCols(data.columns.filter((c) => c !== t));
@@ -198,8 +252,97 @@ export default function App() {
     const data = await run(() => api.applyCleaning(session.session_id, modeClean), "Cleaning applied");
     if (data) {
       setSession(data);
+      setQualityScore(data.quality_score || null);
+      setProfile(data.profile || null);
       await loadCleaning();
     }
+  }
+
+  async function runOutliers(mode: "detect" | "cap" | "drop_rows") {
+    if (!session) return;
+    const data = await run(
+      () => api.outliers(session.session_id, { method: outlierMethod, mode }),
+      mode === "detect" ? "Outliers detected" : "Outlier treatment applied"
+    );
+    if (data) {
+      setOutlierReport(data.report);
+      setSession(data);
+      if (data.quality_score) setQualityScore(data.quality_score);
+    }
+  }
+
+  async function loadEncoding(apply = false) {
+    if (!session) return;
+    const data = await run(
+      () => api.encoding(session.session_id, apply),
+      apply ? "Encoding applied" : "Encoding recommendations ready"
+    );
+    if (data) {
+      setEncodingRecs(data.recommendations);
+      setSession(data);
+    }
+  }
+
+  async function loadScaling(apply = false) {
+    if (!session) return;
+    const data = await run(
+      () => api.scaling(session.session_id, apply),
+      apply ? "Scaling applied" : "Scaling recommendations ready"
+    );
+    if (data) {
+      setScalingRecs(data.recommendations);
+      setSession(data);
+    }
+  }
+
+  async function runFeatureEng() {
+    if (!session) return;
+    const data = await run(() => api.featureEng(session.session_id), "Features engineered");
+    if (data) {
+      setFeConfig(data.config);
+      setSession(data);
+    }
+  }
+
+  async function runReduce(applyDrops = false) {
+    if (!session) return;
+    const data = await run(
+      () =>
+        api.reduce(session.session_id, {
+          corr_threshold: 0.92,
+          run_pca: true,
+          apply_drops: applyDrops,
+        }),
+      applyDrops ? "Correlated variables dropped" : "Reduction analysis ready"
+    );
+    if (data) {
+      setReduction(data.reduction);
+      setSession(data);
+    }
+  }
+
+  async function runTune() {
+    if (!session) return;
+    const data = await run(
+      () => api.tune(session.session_id, { selection_metric: selectionMetric }),
+      "Hyperparameter tuning complete"
+    );
+    if (data) {
+      setTuningResult(data.tuning);
+      if (data.selected_algorithm) setSelectedAlgorithm(data.selected_algorithm);
+    }
+  }
+
+  async function runExplain() {
+    if (!session) return;
+    const data = await run(() => api.explain(session.session_id), "Model explanation ready");
+    if (data) setExplanation(data.explanation);
+  }
+
+  async function loadInsights() {
+    if (!session) return;
+    const data = await run(() => api.insights(session.session_id));
+    if (data) setInsights(data.insights);
   }
 
   async function loadViz() {
@@ -260,11 +403,56 @@ export default function App() {
 
   async function runModelValidation() {
     if (!session) return;
+    if (!selectedModels.length) {
+      setError("Select at least one model");
+      return;
+    }
+    if (!selectedBalances.length) {
+      setError("Select at least one balancing method");
+      return;
+    }
     const data = await run(
-      () => api.validateModels(session.session_id, { test_size: testSize, cv_folds: cvFolds }),
-      "Model validation done"
+      () =>
+        api.validateModels(session.session_id, {
+          test_size: testSize,
+          cv_folds: cvFolds,
+          models: selectedModels,
+          balance_methods: selectedBalances,
+          run_all_combinations: runAllCombos,
+          selection_metric: selectionMetric,
+          auto_select_best: true,
+        }),
+      "Model suite complete — best algorithm selected"
     );
-    if (data) setModelResult(data.result);
+    if (data) {
+      setModelResult(data.result);
+      if (data.selected_algorithm) setSelectedAlgorithm(data.selected_algorithm);
+      else if (data.result.selected_algorithm)
+        setSelectedAlgorithm(data.result.selected_algorithm as Record<string, unknown>);
+    }
+  }
+
+  async function pickBestAlgorithm() {
+    if (!session) return;
+    const data = await run(
+      () => api.autoSelectAlgorithm(session.session_id, selectionMetric),
+      "Best algorithm selected"
+    );
+    if (data) setSelectedAlgorithm(data.selected_algorithm);
+  }
+
+  async function pickAlgorithm(modelId: string, balanceMethod: string) {
+    if (!session) return;
+    const data = await run(
+      () =>
+        api.selectAlgorithm(session.session_id, {
+          model_id: modelId,
+          balance_method: balanceMethod,
+          selection_metric: selectionMetric,
+        }),
+      "Algorithm selected"
+    );
+    if (data) setSelectedAlgorithm(data.selected_algorithm);
   }
 
   async function loadManifest() {
@@ -274,7 +462,10 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (step === 8 && session) loadManifest();
+    if (step === 8 && session) {
+      loadManifest();
+      loadInsights();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, session?.session_id]);
 
@@ -288,6 +479,7 @@ export default function App() {
     setRfResult([]);
     setDataReport(null);
     setModelResult(null);
+    setSelectedAlgorithm(null);
     setManifest(null);
     setMessage(null);
     setError(null);
@@ -304,34 +496,57 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <h1>AutoML Studio</h1>
-          <p>Binary classification · React + Hugging Face</p>
+          <div className="brand-mark">AS</div>
+          <div>
+            <h1>AutoML Studio</h1>
+            <p>Binary classification pipeline</p>
+          </div>
         </div>
+
+        <div className="progress-mini">
+          <div className="label">
+            <span>Progress</span>
+            <span>{Math.round((step / 8) * 100)}%</span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${(step / 8) * 100}%` }} />
+          </div>
+        </div>
+
         <div className="step-list">
           {STEPS.map((s) => (
             <button
               key={s.id}
-              className={`step-btn ${step === s.id ? "active" : ""}`}
+              className={`step-btn ${step === s.id ? "active" : ""} ${s.id < step ? "done" : ""}`}
               onClick={() => setStep(s.id)}
             >
-              {s.id}. {s.title}
-              <small>{s.blurb}</small>
+              <span className="step-num">{s.id < step ? "✓" : s.id}</span>
+              <span>
+                <strong>{s.title}</strong>
+                <small>{s.blurb}</small>
+              </span>
             </button>
           ))}
         </div>
+
         <div className="sidebar-meta">
           {session ? (
             <>
               <div>
-                <strong style={{ color: "#fff" }}>{session.filename}</strong>
+                <strong>{session.filename}</strong>
                 <div>
                   {session.rows.toLocaleString()} rows · {session.columns.length} cols
                 </div>
               </div>
-              {session.target && <div>Target: {session.target}</div>}
+              {session.target && (
+                <div>
+                  Target: <strong>{session.target}</strong>
+                </div>
+              )}
+              <div>Domain: {session.domain}</div>
             </>
           ) : (
-            <div>No dataset loaded</div>
+            <div>No dataset loaded yet</div>
           )}
           <button className="ghost" onClick={resetAll}>
             Reset session
@@ -339,21 +554,34 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="main">
-        <div className="hero">
+      <main className="main" key={step}>
+        <div className="topbar">
           <div>
             <h2>{STEPS[step - 1].title}</h2>
-            <p>Free open-source AutoML pipeline for business binary classification problems.</p>
+            <p>
+              {step === 1 && "Load business data and pick the industry problem domain."}
+              {step === 2 && "Choose the binary target and keep or drop predictor columns."}
+              {step === 3 && "Review cleaning suggestions and apply safe fixes."}
+              {step === 4 && "Explore distributions, missingness, and correlations."}
+              {step === 5 && "Bin numeric features and inspect WoE / Information Value."}
+              {step === 6 && "Rank features and select the strongest predictors."}
+              {step === 7 && "Choose balancing methods and models — run all combinations and compare."}
+              {step === 8 && "Download the package for Predictions Studio."}
+            </p>
           </div>
-          <div className="muted mono">Step {step} / 8</div>
+          <div className="step-chip">
+            Step <em>{step}</em> of 8
+          </div>
         </div>
 
         {error && <div className="error">{error}</div>}
         {message && <div className="success">{message}</div>}
+        {busy && <div className="success">Working…</div>}
 
         {step === 1 && (
           <div className="panel grid-2">
             <div>
+              <p className="panel-title">Data source</p>
               <div className="field">
                 <label>Business domain</label>
                 <select
@@ -375,14 +603,15 @@ export default function App() {
                 </select>
               </div>
               {domainInfo && (
-                <p className="muted">
+                <p className="muted" style={{ marginTop: "-0.35rem", marginBottom: "1rem" }}>
                   {domainInfo.description}
                   <br />
                   Common targets: {domainInfo.common_targets.join(", ")}
                 </p>
               )}
-              <div className="field">
-                <label>Upload CSV</label>
+              <div className="dropzone">
+                <strong>Upload CSV</strong>
+                <p>Banking, retail, healthcare, or any binary classification dataset</p>
                 <input
                   type="file"
                   accept=".csv"
@@ -396,9 +625,22 @@ export default function App() {
               </div>
             </div>
             <div>
+              <p className="panel-title">Data profiling</p>
               {session ? (
-                <>
-                  <div className="grid-4" style={{ marginBottom: "1rem" }}>
+                <div className="split-stack">
+                  {qualityScore && (
+                    <div className="metric" style={{ marginBottom: "0.5rem" }}>
+                      <div className="label">Data quality score</div>
+                      <div className="value">
+                        {String(qualityScore.score)}
+                        <span style={{ fontSize: "1rem", color: "var(--muted)" }}>
+                          {" "}
+                          / 100 · grade {String(qualityScore.grade)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid-2">
                     <div className="metric">
                       <div className="label">Rows</div>
                       <div className="value">{session.rows}</div>
@@ -408,18 +650,33 @@ export default function App() {
                       <div className="value">{session.columns.length}</div>
                     </div>
                     <div className="metric">
-                      <div className="label">Missing</div>
-                      <div className="value">{session.missing_cells ?? 0}</div>
+                      <div className="label">Missing %</div>
+                      <div className="value">
+                        {String(profile?.missing_pct ?? session.missing_cells ?? 0)}
+                      </div>
                     </div>
                     <div className="metric">
                       <div className="label">Duplicates</div>
-                      <div className="value">{session.duplicates ?? 0}</div>
+                      <div className="value">
+                        {String(profile?.duplicate_rows ?? session.duplicates ?? 0)}
+                      </div>
                     </div>
                   </div>
+                  {!!(profile?.warnings as string[] | undefined)?.length && (
+                    <div className="rec">
+                      <h4>Profile warnings</h4>
+                      {(profile?.warnings as string[]).map((w, i) => (
+                        <p key={i}>{w}</p>
+                      ))}
+                    </div>
+                  )}
                   <PreviewTable rows={session.preview} />
-                </>
+                </div>
               ) : (
-                <p className="muted">Upload a CSV or load sample data to begin.</p>
+                <div className="empty-state">
+                  <strong>No data yet</strong>
+                  Upload a CSV or load the banking sample to begin the pipeline.
+                </div>
               )}
             </div>
           </div>
@@ -460,7 +717,7 @@ export default function App() {
                       <XAxis dataKey="class" />
                       <YAxis />
                       <Tooltip />
-                      <Bar dataKey="count" fill="#0f6e56" />
+                      <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -499,35 +756,192 @@ export default function App() {
 
         {step === 3 && session && (
           <div className="panel">
-            <div className="btn-row" style={{ marginTop: 0 }}>
-              <button className="primary" disabled={busy} onClick={() => applyClean("auto")}>
-                Auto-clean (safe)
-              </button>
-              <button className="secondary" disabled={busy} onClick={() => applyClean("all")}>
-                Apply all recommendations
-              </button>
+            {qualityScore && (
+              <div className="success" style={{ marginBottom: "1rem" }}>
+                Quality score: <strong>{String(qualityScore.score)}/100 ({String(qualityScore.grade)})</strong>
+                {(qualityScore.issues as string[] | undefined)?.length
+                  ? ` — ${(qualityScore.issues as string[]).slice(0, 2).join("; ")}`
+                  : ""}
+              </div>
+            )}
+            <div className="tabs">
+              {(
+                [
+                  ["missing", "Missing"],
+                  ["outliers", "Outliers"],
+                  ["duplicates", "Duplicates"],
+                  ["encoding", "Encoding"],
+                  ["scaling", "Scaling"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  className={`tab ${cleanTab === id ? "active" : ""}`}
+                  onClick={() => {
+                    setCleanTab(id);
+                    if (id === "encoding") loadEncoding(false);
+                    if (id === "scaling") loadScaling(false);
+                    if (id === "outliers") runOutliers("detect");
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <div style={{ marginTop: "1rem" }}>
-              {recs.length === 0 ? (
-                <div className="success">No major cleaning issues detected.</div>
-              ) : (
-                recs.map((r, i) => (
-                  <div className="rec" key={i}>
-                    <h4>
-                      <span
-                        className={`badge ${
-                          r.severity === "high" ? "danger" : r.severity === "medium" ? "warn" : "ok"
-                        }`}
-                      >
-                        {String(r.severity)}
-                      </span>{" "}
-                      [{String(r.category)}] {String(r.issue)}
-                    </h4>
-                    <p>{String(r.recommendation)}</p>
+
+            {cleanTab === "missing" && (
+              <>
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="primary" disabled={busy} onClick={() => applyClean("auto")}>
+                    Auto-clean (safe)
+                  </button>
+                  <button className="secondary" disabled={busy} onClick={() => applyClean("all")}>
+                    Apply all recommendations
+                  </button>
+                </div>
+                <div style={{ marginTop: "1rem" }}>
+                  {recs.filter((r) => r.category === "missing_values" || r.category === "target").length ===
+                  0 ? (
+                    <div className="success">No missing-value issues detected.</div>
+                  ) : (
+                    recs
+                      .filter((r) => r.category === "missing_values" || r.category === "target")
+                      .map((r, i) => (
+                        <div className="rec" key={i}>
+                          <h4>
+                            <span
+                              className={`badge ${
+                                r.severity === "high"
+                                  ? "danger"
+                                  : r.severity === "medium"
+                                    ? "warn"
+                                    : "ok"
+                              }`}
+                            >
+                              {String(r.severity)}
+                            </span>{" "}
+                            {String(r.issue)}
+                          </h4>
+                          <p>
+                            {String(r.recommendation)}
+                            {r.strategy ? ` · strategy=${String(r.strategy)}` : ""}
+                          </p>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </>
+            )}
+
+            {cleanTab === "outliers" && (
+              <>
+                <div className="field">
+                  <label>Detection method</label>
+                  <select value={outlierMethod} onChange={(e) => setOutlierMethod(e.target.value)}>
+                    <option value="iqr">IQR (1.5×)</option>
+                    <option value="zscore">Z-Score</option>
+                    <option value="isolation_forest">Isolation Forest</option>
+                  </select>
+                </div>
+                <div className="btn-row">
+                  <button className="secondary" disabled={busy} onClick={() => runOutliers("detect")}>
+                    Detect
+                  </button>
+                  <button className="primary" disabled={busy} onClick={() => runOutliers("cap")}>
+                    Cap outliers
+                  </button>
+                  <button className="secondary" disabled={busy} onClick={() => runOutliers("drop_rows")}>
+                    Drop outlier rows
+                  </button>
+                </div>
+                {outlierReport && (
+                  <pre className="mono" style={{ fontSize: "0.8rem", whiteSpace: "pre-wrap" }}>
+                    {JSON.stringify(outlierReport, null, 2)}
+                  </pre>
+                )}
+              </>
+            )}
+
+            {cleanTab === "duplicates" && (
+              <>
+                <div className="grid-2">
+                  <div className="metric">
+                    <div className="label">Duplicate rows</div>
+                    <div className="value">
+                      {String(profile?.duplicate_rows ?? session.duplicates ?? 0)}
+                    </div>
                   </div>
-                ))
-              )}
-            </div>
+                  <div className="metric">
+                    <div className="label">Duplicate %</div>
+                    <div className="value">{String(profile?.duplicate_pct ?? 0)}</div>
+                  </div>
+                </div>
+                <div className="btn-row">
+                  <button className="primary" disabled={busy} onClick={() => applyClean("auto")}>
+                    Drop duplicates (via auto-clean)
+                  </button>
+                </div>
+                {recs
+                  .filter((r) => r.category === "duplicates")
+                  .map((r, i) => (
+                    <div className="rec" key={i}>
+                      <h4>{String(r.issue)}</h4>
+                      <p>{String(r.recommendation)}</p>
+                    </div>
+                  ))}
+              </>
+            )}
+
+            {cleanTab === "encoding" && (
+              <>
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="secondary" disabled={busy} onClick={() => loadEncoding(false)}>
+                    Refresh recommendations
+                  </button>
+                  <button className="primary" disabled={busy} onClick={() => loadEncoding(true)}>
+                    Apply encoding
+                  </button>
+                </div>
+                {encodingRecs && (
+                  <PreviewTable
+                    rows={
+                      ((encodingRecs.recommendations as Record<string, unknown>[]) || []).map((r) => ({
+                        column: r.column,
+                        method: r.method,
+                        n_unique: r.n_unique,
+                        reason: r.reason,
+                      }))
+                    }
+                  />
+                )}
+              </>
+            )}
+
+            {cleanTab === "scaling" && (
+              <>
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="secondary" disabled={busy} onClick={() => loadScaling(false)}>
+                    Refresh recommendations
+                  </button>
+                  <button className="primary" disabled={busy} onClick={() => loadScaling(true)}>
+                    Apply scaling
+                  </button>
+                </div>
+                {scalingRecs && (
+                  <PreviewTable
+                    rows={
+                      ((scalingRecs.recommendations as Record<string, unknown>[]) || []).map((r) => ({
+                        column: r.column,
+                        method: r.method,
+                        skew: r.skew,
+                        reason: r.reason,
+                      }))
+                    }
+                  />
+                )}
+              </>
+            )}
+
             <PreviewTable rows={session.preview} />
           </div>
         )}
@@ -553,7 +967,7 @@ export default function App() {
                     <XAxis dataKey="class" />
                     <YAxis />
                     <Tooltip />
-                    <Bar dataKey="count" fill="#0f6e56" />
+                    <Bar dataKey="count" fill="#0d9488" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -567,7 +981,7 @@ export default function App() {
                       <XAxis type="number" />
                       <YAxis type="category" dataKey="column" width={80} />
                       <Tooltip />
-                      <Bar dataKey="missing_count" fill="#c45c26" />
+                      <Bar dataKey="missing_count" fill="#ea580c" radius={[0, 6, 6, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
@@ -595,7 +1009,7 @@ export default function App() {
                       <YAxis />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="count" fill="#1a2332" />
+                      <Bar dataKey="count" fill="#0f172a" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -609,7 +1023,7 @@ export default function App() {
                     <XAxis type="number" domain={[-1, 1]} />
                     <YAxis type="category" dataKey="feature" width={100} />
                     <Tooltip />
-                    <Bar dataKey="correlation" fill="#0f6e56" />
+                    <Bar dataKey="correlation" fill="#0d9488" radius={[0, 6, 6, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -714,7 +1128,42 @@ export default function App() {
               <button className="secondary" disabled={busy} onClick={runRf}>
                 RF importance
               </button>
+              <button className="secondary" disabled={busy} onClick={runFeatureEng}>
+                Feature engineering
+              </button>
+              <button className="secondary" disabled={busy} onClick={() => runReduce(false)}>
+                Variable reduction
+              </button>
+              <button className="secondary" disabled={busy} onClick={() => runReduce(true)}>
+                Drop high-corr pairs
+              </button>
             </div>
+            {feConfig && (
+              <div className="success" style={{ marginTop: "0.75rem" }}>
+                Engineered {String(feConfig.n_created)} features
+                {Array.isArray(feConfig.created)
+                  ? `: ${(feConfig.created as string[]).slice(0, 6).join(", ")}`
+                  : ""}
+              </div>
+            )}
+            {reduction && (
+              <div className="rec" style={{ marginTop: "0.75rem" }}>
+                <h4>Variable reduction</h4>
+                <p>
+                  Drop suggestions: {String(reduction.n_drop_suggestions)} · PCA components for 95%
+                  var:{" "}
+                  {String(
+                    (reduction.pca as Record<string, unknown> | undefined)
+                      ?.components_for_target_variance ?? "—"
+                  )}
+                </p>
+                {!!(reduction.drop_suggestions as Record<string, unknown>[] | undefined)?.length && (
+                  <PreviewTable
+                    rows={(reduction.drop_suggestions as Record<string, unknown>[]).slice(0, 12)}
+                  />
+                )}
+              </div>
+            )}
             {!!fsResult.length && scoreKey && (
               <div className="chart-box" style={{ marginTop: "1rem", height: 360 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -727,7 +1176,7 @@ export default function App() {
                     <XAxis type="number" />
                     <YAxis type="category" dataKey="feature" width={110} />
                     <Tooltip />
-                    <Bar dataKey={scoreKey} fill="#0f6e56" />
+                    <Bar dataKey={scoreKey} fill="#0d9488" radius={[0, 6, 6, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -749,8 +1198,9 @@ export default function App() {
 
         {step === 7 && session && (
           <div className="panel">
+            <p className="panel-title">Data quality</p>
             <div className="btn-row" style={{ marginTop: 0 }}>
-              <button className="primary" disabled={busy} onClick={runDataValidation}>
+              <button className="secondary" disabled={busy} onClick={runDataValidation}>
                 Run data validation
               </button>
             </div>
@@ -780,7 +1230,76 @@ export default function App() {
                 ))}
               </div>
             )}
-            <div className="grid-2">
+
+            <p className="panel-title" style={{ marginTop: "1.25rem" }}>
+              Class balancing / sampling
+            </p>
+            <div className="btn-row" style={{ marginTop: 0, marginBottom: "0.5rem" }}>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setSelectedBalances(balanceOptions.map((b) => b.id))}
+              >
+                Select all balancing
+              </button>
+              <button className="secondary" type="button" onClick={() => setSelectedBalances(["none"])}>
+                None only
+              </button>
+            </div>
+            <div className="checks">
+              {balanceOptions.map((b) => (
+                <label key={b.id} title={b.description}>
+                  <input
+                    type="checkbox"
+                    checked={selectedBalances.includes(b.id)}
+                    onChange={(e) =>
+                      setSelectedBalances((prev) =>
+                        e.target.checked ? [...prev, b.id] : prev.filter((x) => x !== b.id)
+                      )
+                    }
+                  />
+                  {b.label}
+                </label>
+              ))}
+            </div>
+
+            <p className="panel-title" style={{ marginTop: "1.25rem" }}>
+              Models
+            </p>
+            <div className="btn-row" style={{ marginTop: 0, marginBottom: "0.5rem" }}>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setSelectedModels(modelOptions.map((m) => m.id))}
+              >
+                Select all models
+              </button>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => setSelectedModels(["logistic_regression", "random_forest"])}
+              >
+                Logistic + RF
+              </button>
+            </div>
+            <div className="checks">
+              {modelOptions.map((m) => (
+                <label key={m.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedModels.includes(m.id)}
+                    onChange={(e) =>
+                      setSelectedModels((prev) =>
+                        e.target.checked ? [...prev, m.id] : prev.filter((x) => x !== m.id)
+                      )
+                    }
+                  />
+                  {m.label}
+                </label>
+              ))}
+            </div>
+
+            <div className="grid-2" style={{ marginTop: "1rem" }}>
               <div className="field">
                 <label>Test size: {testSize}</label>
                 <input
@@ -803,28 +1322,166 @@ export default function App() {
                 />
               </div>
             </div>
+
+            <div className="field" style={{ marginTop: "0.5rem" }}>
+              <label>Best-algorithm metric</label>
+              <select value={selectionMetric} onChange={(e) => setSelectionMetric(e.target.value)}>
+                <option value="auc_roc">AUC-ROC (recommended)</option>
+                <option value="f1">F1-Score</option>
+                <option value="accuracy">Accuracy</option>
+                <option value="precision">Precision</option>
+                <option value="recall">Recall</option>
+                <option value="cv_auc_mean">CV AUC mean</option>
+              </select>
+            </div>
+
+            <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
+              <input
+                type="checkbox"
+                checked={runAllCombos}
+                onChange={(e) => setRunAllCombos(e.target.checked)}
+              />
+              Run all combinations (every balancing method × every model)
+            </label>
+
             <div className="btn-row">
-              <button className="secondary" disabled={busy} onClick={runModelValidation}>
-                Run model validation
+              <button className="primary" disabled={busy} onClick={runModelValidation}>
+                Train, compare & select best
+              </button>
+              <span className="muted">
+                {selectedBalances.length} balancing × {selectedModels.length} models ={" "}
+                {selectedBalances.length * selectedModels.length} runs
+              </span>
+            </div>
+
+            {selectedAlgorithm && (
+              <div className="success" style={{ marginTop: "1rem" }}>
+                Selected algorithm:{" "}
+                <strong>
+                  {String(selectedAlgorithm.model_label)} + {String(selectedAlgorithm.balance_label)}
+                </strong>
+                {" · "}
+                metric={String(selectedAlgorithm.selection_metric)} · by={String(selectedAlgorithm.selected_by)}
+                {selectedAlgorithm.metrics ? (
+                  <>
+                    {" · "}AUC {String((selectedAlgorithm.metrics as Record<string, unknown>).auc_roc)} · F1{" "}
+                    {String((selectedAlgorithm.metrics as Record<string, unknown>).f1)}
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            <div className="btn-row">
+              <button className="secondary" disabled={busy || !selectedAlgorithm} onClick={runTune}>
+                Tune hyperparameters
+              </button>
+              <button className="secondary" disabled={busy || !selectedAlgorithm} onClick={runExplain}>
+                Explain model
               </button>
             </div>
+            {tuningResult && (
+              <div className="rec">
+                <h4>Hyperparameter tuning — {String(tuningResult.model_label)}</h4>
+                <p>
+                  Status {String(tuningResult.status)} · best score {String(tuningResult.best_score)} ·
+                  metric {String(tuningResult.selection_metric)}
+                </p>
+                <pre className="mono" style={{ fontSize: "0.78rem", whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(tuningResult.best_params || {}, null, 2)}
+                </pre>
+              </div>
+            )}
+            {explanation && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <p className="panel-title">
+                  Model explanation ({String(explanation.method)})
+                </p>
+                <div className="chart-box" style={{ height: 280 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={[...((explanation.importances as Record<string, unknown>[]) || [])]
+                        .slice(0, 12)
+                        .reverse()}
+                      layout="vertical"
+                      margin={{ left: 110 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" />
+                      <YAxis type="category" dataKey="feature" width={110} />
+                      <Tooltip />
+                      <Bar dataKey="importance" fill="#0d9488" radius={[0, 6, 6, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {modelResult && (
-              <div style={{ marginTop: "1rem" }}>
-                {Object.entries((modelResult.models as Record<string, Record<string, number>>) || {}).map(
-                  ([name, metrics]) => (
-                    <div key={name} style={{ marginBottom: "1rem" }}>
-                      <h4>{name}</h4>
-                      <div className="grid-4">
-                        {["accuracy", "precision", "recall", "f1", "auc_roc", "cv_auc_mean"].map((k) => (
-                          <div className="metric" key={k}>
-                            <div className="label">{k}</div>
-                            <div className="value">{metrics[k] ?? "N/A"}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                )}
+              <div style={{ marginTop: "1.25rem" }}>
+                <div className="btn-row" style={{ marginTop: 0 }}>
+                  <button className="secondary" disabled={busy} onClick={pickBestAlgorithm}>
+                    Re-select best by {selectionMetric}
+                  </button>
+                </div>
+
+                <p className="panel-title">Leaderboard — click Select to choose an algorithm</p>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Model</th>
+                        <th>Balancing</th>
+                        <th>AUC</th>
+                        <th>F1</th>
+                        <th>Accuracy</th>
+                        <th>Precision</th>
+                        <th>Recall</th>
+                        <th>CV AUC</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {((modelResult.leaderboard as Record<string, unknown>[]) || []).map((r, i) => {
+                        const m = (r.metrics as Record<string, unknown>) || {};
+                        const isSelected =
+                          selectedAlgorithm &&
+                          selectedAlgorithm.model_id === r.model_id &&
+                          selectedAlgorithm.balance_method === r.balance_method;
+                        return (
+                          <tr key={`${r.model_id}-${r.balance_method}-${i}`} style={isSelected ? { background: "#ecfdf5" } : undefined}>
+                            <td>{i + 1}</td>
+                            <td>{String(r.model_label)}</td>
+                            <td>{String(r.balance_label)}</td>
+                            <td>{String(m.auc_roc ?? "")}</td>
+                            <td>{String(m.f1 ?? "")}</td>
+                            <td>{String(m.accuracy ?? "")}</td>
+                            <td>{String(m.precision ?? "")}</td>
+                            <td>{String(m.recall ?? "")}</td>
+                            <td>{String(m.cv_auc_mean ?? "")}</td>
+                            <td>
+                              <button
+                                className={isSelected ? "primary" : "secondary"}
+                                style={{ padding: "0.35rem 0.7rem", fontSize: "0.78rem" }}
+                                disabled={busy}
+                                onClick={() => pickAlgorithm(String(r.model_id), String(r.balance_method))}
+                              >
+                                {isSelected ? "Selected" : "Select"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className="panel-title" style={{ marginTop: "1rem" }}>
+                  Split info
+                </p>
+                <pre className="mono" style={{ fontSize: "0.8rem", whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(modelResult.split, null, 2)}
+                </pre>
               </div>
             )}
           </div>
@@ -850,16 +1507,69 @@ export default function App() {
                 <div className="value">{session.selected_features?.length || session.columns.length - 1}</div>
               </div>
               <div className="metric">
-                <div className="label">Rows</div>
-                <div className="value">{session.rows}</div>
+                <div className="label">Quality</div>
+                <div className="value" style={{ fontSize: "1rem" }}>
+                  {qualityScore ? `${String(qualityScore.score)} (${String(qualityScore.grade)})` : "—"}
+                </div>
               </div>
             </div>
+            {selectedAlgorithm ? (
+              <div className="success" style={{ marginTop: "1rem" }}>
+                Export will use algorithm:{" "}
+                <strong>
+                  {String(selectedAlgorithm.model_label)} + {String(selectedAlgorithm.balance_label)}
+                </strong>
+              </div>
+            ) : (
+              <div className="error" style={{ marginTop: "1rem" }}>
+                No algorithm selected yet — run Step 7 to pick the best model.
+              </div>
+            )}
+
+            {insights && (
+              <div style={{ marginTop: "1rem" }}>
+                <p className="panel-title">Business insights</p>
+                <div className="rec">
+                  <h4>Summary</h4>
+                  {(insights.summary_bullets as string[] | undefined)?.map((b, i) => (
+                    <p key={i}>{b}</p>
+                  ))}
+                </div>
+                {!!(insights.risks as string[] | undefined)?.length && (
+                  <div className="rec">
+                    <h4>Risks</h4>
+                    {(insights.risks as string[]).map((b, i) => (
+                      <p key={i}>{b}</p>
+                    ))}
+                  </div>
+                )}
+                {!!(insights.opportunities as string[] | undefined)?.length && (
+                  <div className="rec">
+                    <h4>Opportunities</h4>
+                    {(insights.opportunities as string[]).map((b, i) => (
+                      <p key={i}>{b}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="btn-row">
               <a className="primary" href={api.exportUrl(session.session_id)} style={{ textDecoration: "none" }}>
                 Download ZIP for Predictions Studio
               </a>
+              <a
+                className="secondary"
+                href={api.reportUrl(session.session_id)}
+                style={{ textDecoration: "none" }}
+              >
+                Download executive report (HTML)
+              </a>
               <button className="secondary" onClick={loadManifest}>
                 Refresh manifest
+              </button>
+              <button className="secondary" onClick={loadInsights}>
+                Refresh insights
               </button>
             </div>
             {manifest && (
@@ -884,10 +1594,15 @@ export default function App() {
 
         {!session && step > 1 && (
           <div className="panel">
-            <p className="muted">Load data in Step 1 first.</p>
-            <button className="primary" onClick={() => setStep(1)}>
-              Go to Upload
-            </button>
+            <div className="empty-state">
+              <strong>Load data first</strong>
+              Go back to Upload & Domain to start the pipeline.
+            </div>
+            <div className="btn-row" style={{ justifyContent: "center" }}>
+              <button className="primary" onClick={() => setStep(1)}>
+                Go to Upload
+              </button>
+            </div>
           </div>
         )}
 

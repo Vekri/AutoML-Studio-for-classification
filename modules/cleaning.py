@@ -43,18 +43,21 @@ def generate_cleaning_recommendations(df: pd.DataFrame, target: str) -> list[dic
                 }
             )
         elif missing_pct > 0:
-            strategy = "median" if pd.api.types.is_numeric_dtype(series) else "mode"
-            recommendations.append(
-                {
-                    "severity": "low" if missing_pct < 5 else "medium",
-                    "category": "missing_values",
-                    "issue": f"'{col}' has {missing_pct:.1f}% missing values",
-                    "recommendation": f"Impute using {strategy}",
-                    "action": "impute",
-                    "column": col,
-                    "strategy": strategy,
-                }
-            )
+                    strategy = "median" if pd.api.types.is_numeric_dtype(series) else "mode"
+                    # Prefer KNN hint for moderate numeric missingness
+                    if pd.api.types.is_numeric_dtype(series) and 5 <= missing_pct <= 30:
+                        strategy = "knn"
+                    recommendations.append(
+                        {
+                            "severity": "low" if missing_pct < 5 else "medium",
+                            "category": "missing_values",
+                            "issue": f"'{col}' has {missing_pct:.1f}% missing values",
+                            "recommendation": f"Impute using {strategy}",
+                            "action": "impute",
+                            "column": col,
+                            "strategy": strategy,
+                        }
+                    )
 
         if pd.api.types.is_numeric_dtype(series):
             q1, q3 = series.quantile(0.25), series.quantile(0.75)
@@ -155,22 +158,43 @@ def apply_cleaning(
 
         elif act == "impute" and col and col in result.columns:
             strategy = action.get("strategy", "median")
-            if pd.api.types.is_numeric_dtype(result[col]):
-                if strategy == "median":
-                    fill_val = result[col].median()
-                elif strategy == "mean":
-                    fill_val = result[col].mean()
+            if strategy == "knn" and pd.api.types.is_numeric_dtype(result[col]):
+                numeric_cols = [
+                    c for c in result.columns if pd.api.types.is_numeric_dtype(result[c])
+                ]
+                if len(numeric_cols) >= 1:
+                    imputer = KNNImputer(n_neighbors=min(5, max(2, len(result) // 10)))
+                    block = result[numeric_cols].copy()
+                    imputed = imputer.fit_transform(block)
+                    result[numeric_cols] = imputed
+                    config["imputation_values"][col] = "knn"
+                    config["actions_applied"].append(
+                        {"action": act, "column": col, "strategy": "knn", "n_neighbors": imputer.n_neighbors}
+                    )
                 else:
+                    fill_val = result[col].median()
+                    result[col] = result[col].fillna(fill_val)
+                    config["imputation_values"][col] = str(fill_val)
+                    config["actions_applied"].append({"action": act, "column": col, "strategy": "median"})
+            elif pd.api.types.is_numeric_dtype(result[col]):
+                if strategy == "mean":
+                    fill_val = result[col].mean()
+                elif strategy == "mode":
                     fill_val = result[col].mode().iloc[0] if not result[col].mode().empty else 0
+                else:
+                    fill_val = result[col].median()
+                result[col] = result[col].fillna(fill_val)
+                config["imputation_values"][col] = str(fill_val)
+                config["actions_applied"].append({"action": act, "column": col, "strategy": strategy})
             else:
                 fill_val = (
                     result[col].mode().iloc[0]
                     if not result[col].mode().empty
                     else "Unknown"
                 )
-            result[col] = result[col].fillna(fill_val)
-            config["imputation_values"][col] = str(fill_val)
-            config["actions_applied"].append({"action": act, "column": col, "strategy": strategy})
+                result[col] = result[col].fillna(fill_val)
+                config["imputation_values"][col] = str(fill_val)
+                config["actions_applied"].append({"action": act, "column": col, "strategy": strategy})
 
         elif act == "cap_outliers" and col and col in result.columns:
             q1, q3 = result[col].quantile(0.25), result[col].quantile(0.75)

@@ -5,6 +5,24 @@ export type DomainInfo = {
   key_metrics: string[];
 };
 
+export type BalanceMethod = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export type ModelOption = {
+  id: string;
+  label: string;
+  supports_class_weight: boolean;
+};
+
+export type OutlierMethod = {
+  id: string;
+  label: string;
+  description: string;
+};
+
 export type SessionPayload = {
   session_id: string;
   filename: string;
@@ -25,6 +43,14 @@ export type SessionPayload = {
   binning_config?: Record<string, unknown>;
   woe_tables?: Record<string, Record<string, unknown>[]>;
   result?: Record<string, unknown>[];
+  profile?: Record<string, unknown>;
+  quality_score?: Record<string, unknown> | null;
+  selected_algorithm?: Record<string, unknown> | null;
+  has_encoding?: boolean;
+  has_scaling?: boolean;
+  has_feature_eng?: boolean;
+  has_explanation?: boolean;
+  has_tuning?: boolean;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -45,7 +71,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<{ status: string }>("/api/health"),
   domains: () =>
-    request<{ domains: DomainInfo[]; feature_selection_methods: string[] }>("/api/domains"),
+    request<{
+      domains: DomainInfo[];
+      feature_selection_methods: string[];
+      balance_methods: BalanceMethod[];
+      models: ModelOption[];
+      outlier_methods?: OutlierMethod[];
+    }>("/api/domains"),
   sample: (domain = "Banking") =>
     request<SessionPayload>(`/api/sample?domain=${encodeURIComponent(domain)}`, { method: "POST" }),
   upload: async (file: File, domain: string) => {
@@ -80,6 +112,88 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode }),
     }),
+  profile: (sessionId: string, refresh = false) =>
+    request<{ profile: Record<string, unknown> } & SessionPayload>(
+      `/api/session/${sessionId}/profile?refresh=${refresh}`
+    ),
+  qualityScore: (sessionId: string) =>
+    request<{ quality_score: Record<string, unknown> } & SessionPayload>(
+      `/api/session/${sessionId}/quality-score`
+    ),
+  outliers: (
+    sessionId: string,
+    body: { method: string; mode: string; z_threshold?: number; contamination?: number }
+  ) =>
+    request<{ report: Record<string, unknown> } & SessionPayload>(
+      `/api/session/${sessionId}/outliers`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    ),
+  encoding: (sessionId: string, apply = false) =>
+    request<{ recommendations: Record<string, unknown>; config?: Record<string, unknown> } & SessionPayload>(
+      `/api/session/${sessionId}/encoding`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apply }),
+      }
+    ),
+  scaling: (sessionId: string, apply = false, algorithm_hint?: string) =>
+    request<{ recommendations: Record<string, unknown>; config?: Record<string, unknown> } & SessionPayload>(
+      `/api/session/${sessionId}/scaling`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apply, algorithm_hint }),
+      }
+    ),
+  featureEng: (sessionId: string, body?: { max_interactions?: number; include_datetime?: boolean }) =>
+    request<{ config: Record<string, unknown> } & SessionPayload>(
+      `/api/session/${sessionId}/feature-eng`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || { max_interactions: 5, include_datetime: true }),
+      }
+    ),
+  reduce: (
+    sessionId: string,
+    body?: {
+      corr_threshold?: number;
+      run_pca?: boolean;
+      apply_drops?: boolean;
+      drop_columns?: string[];
+    }
+  ) =>
+    request<{ reduction: Record<string, unknown> } & SessionPayload>(
+      `/api/session/${sessionId}/reduce`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || { corr_threshold: 0.92, run_pca: true, apply_drops: false }),
+      }
+    ),
+  tune: (sessionId: string, body?: { selection_metric?: string; n_iter?: number; cv_folds?: number }) =>
+    request<{ tuning: Record<string, unknown>; selected_algorithm?: Record<string, unknown> | null }>(
+      `/api/session/${sessionId}/tune`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || { selection_metric: "auc_roc", n_iter: 20, cv_folds: 3 }),
+      }
+    ),
+  explain: (sessionId: string, top_k = 15) =>
+    request<{ explanation: Record<string, unknown> }>(`/api/session/${sessionId}/explain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ top_k }),
+    }),
+  insights: (sessionId: string) =>
+    request<{ insights: Record<string, unknown> }>(`/api/session/${sessionId}/insights`),
+  reportUrl: (sessionId: string) => `/api/session/${sessionId}/report.html`,
   visualizations: (sessionId: string) =>
     request<{
       target_distribution: { class: string; count: number }[];
@@ -121,12 +235,51 @@ export const api = {
       `/api/session/${sessionId}/validate/data`,
       { method: "POST" }
     ),
-  validateModels: (sessionId: string, body: { test_size: number; cv_folds: number }) =>
-    request<{ result: Record<string, unknown> }>(`/api/session/${sessionId}/validate/models`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+  validateModels: (
+    sessionId: string,
+    body: {
+      test_size: number;
+      cv_folds: number;
+      models: string[];
+      balance_methods: string[];
+      run_all_combinations: boolean;
+      selection_metric?: string;
+      auto_select_best?: boolean;
+    }
+  ) =>
+    request<{ result: Record<string, unknown>; selected_algorithm?: Record<string, unknown> | null }>(
+      `/api/session/${sessionId}/validate/models`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    ),
+  selectAlgorithm: (
+    sessionId: string,
+    body: { model_id: string; balance_method: string; selection_metric?: string }
+  ) =>
+    request<{ selected_algorithm: Record<string, unknown> }>(
+      `/api/session/${sessionId}/select-algorithm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    ),
+  autoSelectAlgorithm: (sessionId: string, selection_metric = "auc_roc") =>
+    request<{ selected_algorithm: Record<string, unknown> }>(
+      `/api/session/${sessionId}/select-algorithm/auto`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selection_metric }),
+      }
+    ),
+  getSelectedAlgorithm: (sessionId: string) =>
+    request<{ selected_algorithm: Record<string, unknown> | null }>(
+      `/api/session/${sessionId}/selected-algorithm`
+    ),
   manifest: (sessionId: string) =>
     request<Record<string, unknown>>(`/api/session/${sessionId}/manifest`),
   exportUrl: (sessionId: string) => `/api/session/${sessionId}/export.zip`,

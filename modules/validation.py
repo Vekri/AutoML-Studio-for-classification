@@ -4,19 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
 import pandas as pd
-from sklearn.model_selection import cross_val_score, train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
-from sklearn.preprocessing import LabelEncoder
+
+from modules.modeling import run_model_suite, run_model_validation  # noqa: F401
 
 
 def validate_dataset(df: pd.DataFrame, target: str, features: list[str] | None = None) -> dict[str, Any]:
@@ -50,7 +40,7 @@ def validate_dataset(df: pd.DataFrame, target: str, features: list[str] | None =
     else:
         add_check("binary_target", "fail", f"Target has {n_unique} unique values (expected 2)")
 
-    missing_target = target_series.isna().sum()
+    missing_target = int(target_series.isna().sum())
     if missing_target == 0:
         add_check("target_missing", "pass", "No missing values in target")
     else:
@@ -58,13 +48,17 @@ def validate_dataset(df: pd.DataFrame, target: str, features: list[str] | None =
 
     class_counts = target_series.value_counts()
     if len(class_counts) == 2:
-        ratio = class_counts.min() / class_counts.max()
+        ratio = float(class_counts.min() / class_counts.max())
         if ratio >= 0.1:
             add_check("class_balance", "pass", f"Class balance ratio: {ratio:.3f}")
         elif ratio >= 0.05:
             add_check("class_balance", "warning", f"Mild imbalance — ratio: {ratio:.3f}")
         else:
-            add_check("class_balance", "warning", f"Severe imbalance — ratio: {ratio:.3f}. Consider SMOTE or class weights")
+            add_check(
+                "class_balance",
+                "warning",
+                f"Severe imbalance — ratio: {ratio:.3f}. Try SMOTE / class weights in modeling",
+            )
 
     feature_cols = features or [c for c in df.columns if c != target]
     constant_cols = [c for c in feature_cols if df[c].nunique(dropna=True) <= 1]
@@ -73,15 +67,13 @@ def validate_dataset(df: pd.DataFrame, target: str, features: list[str] | None =
     else:
         add_check("constant_features", "warning", f"Constant features: {constant_cols}")
 
-    high_missing = [
-        c for c in feature_cols if df[c].isna().mean() > 0.3 and c != target
-    ]
+    high_missing = [c for c in feature_cols if df[c].isna().mean() > 0.3 and c != target]
     if not high_missing:
         add_check("missing_features", "pass", "No features with >30% missing values")
     else:
         add_check("missing_features", "warning", f"High missing: {high_missing}")
 
-    dup_pct = df.duplicated().mean() * 100
+    dup_pct = float(df.duplicated().mean() * 100)
     if dup_pct < 1:
         add_check("duplicates", "pass", f"Duplicate rate: {dup_pct:.2f}%")
     else:
@@ -95,76 +87,100 @@ def validate_dataset(df: pd.DataFrame, target: str, features: list[str] | None =
     return report
 
 
-def run_model_validation(
+def compute_quality_score(
     df: pd.DataFrame,
-    target: str,
-    features: list[str],
-    test_size: float = 0.2,
-    cv_folds: int = 5,
+    target: str | None = None,
+    features: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Quick model validation with train/test split and cross-validation."""
-    features = [c for c in features if c in df.columns and c != target]
-    if not features:
-        raise ValueError("No valid features available for model validation.")
+    """
+    Compute a single 0–100 data quality score from missingness, duplicates,
+    constants, class balance, outliers, and target validity.
+    """
+    breakdown: dict[str, float] = {}
+    rows = max(len(df), 1)
+    feature_cols = features or [c for c in df.columns if c != target]
 
-    work = df[features + [target]].dropna(subset=[target]).copy()
-    X = work[features].copy()
-    y = work[target].copy()
+    missing_pct = float(df.isna().sum().sum()) / max(rows * max(df.shape[1], 1), 1)
+    breakdown["completeness"] = round(max(0.0, 25.0 * (1.0 - min(missing_pct / 0.25, 1.0))), 2)
 
-    if not pd.api.types.is_numeric_dtype(y):
-        y = LabelEncoder().fit_transform(y.astype(str))
-    else:
-        y = y.astype(int)
+    dup_pct = float(df.duplicated().mean())
+    breakdown["uniqueness"] = round(max(0.0, 15.0 * (1.0 - min(dup_pct / 0.1, 1.0))), 2)
 
-    for col in X.columns:
-        if not pd.api.types.is_numeric_dtype(X[col]):
-            X[col] = LabelEncoder().fit_transform(X[col].astype(str).fillna("__missing__"))
-        else:
-            X[col] = X[col].fillna(X[col].median() if X[col].notna().any() else 0)
-
-    # Ensure enough samples per class for stratify
-    unique, counts = np.unique(y, return_counts=True)
-    can_stratify = len(unique) == 2 and counts.min() >= 2
-
-    n_splits = min(cv_folds, 5, int(counts.min()) if can_stratify else 2)
-    n_splits = max(2, n_splits)
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=min(test_size, 0.4),
-        random_state=42,
-        stratify=y if can_stratify else None,
+    constants = sum(1 for c in feature_cols if df[c].nunique(dropna=True) <= 1)
+    id_like = sum(
+        1
+        for c in feature_cols
+        if df[c].nunique(dropna=True) == rows
+        and rows > 1
+        and not pd.api.types.is_numeric_dtype(df[c])
     )
+    bad_feat_ratio = min((constants + id_like) / max(len(feature_cols), 1), 1.0)
+    breakdown["feature_validity"] = round(15.0 * (1.0 - bad_feat_ratio), 2)
 
-    results: dict[str, Any] = {
-        "models": {},
-        "split": {"train": int(len(X_train)), "test": int(len(X_test))},
-        "features_used": features,
+    numeric = [c for c in feature_cols if pd.api.types.is_numeric_dtype(df[c])]
+    outlier_fracs: list[float] = []
+    for col in numeric:
+        s = df[col].dropna()
+        if len(s) < 5:
+            continue
+        q1, q3 = s.quantile(0.25), s.quantile(0.75)
+        iqr = q3 - q1
+        if iqr <= 0:
+            continue
+        outlier_fracs.append(float(((s < q1 - 1.5 * iqr) | (s > q3 + 1.5 * iqr)).mean()))
+    avg_out = float(sum(outlier_fracs) / len(outlier_fracs)) if outlier_fracs else 0.0
+    breakdown["outlier_health"] = round(max(0.0, 15.0 * (1.0 - min(avg_out / 0.15, 1.0))), 2)
+
+    target_score = 10.0
+    if target and target in df.columns:
+        t = df[target]
+        n_unique = int(t.nunique(dropna=True))
+        miss = float(t.isna().mean())
+        target_score = 0.0
+        if n_unique == 2:
+            target_score += 12.0
+        elif n_unique > 2:
+            target_score += 4.0
+        target_score += 8.0 * (1.0 - min(miss / 0.05, 1.0))
+    breakdown["target_health"] = round(min(target_score, 20.0), 2)
+
+    balance_score = 5.0
+    if target and target in df.columns and df[target].nunique(dropna=True) == 2:
+        vc = df[target].value_counts()
+        ratio = float(vc.min() / vc.max()) if vc.max() else 0.0
+        balance_score = 10.0 * min(ratio / 0.5, 1.0)
+    breakdown["class_balance"] = round(balance_score, 2)
+
+    score = float(max(0.0, min(100.0, round(sum(breakdown.values()), 1))))
+    if score >= 85:
+        grade = "A"
+    elif score >= 70:
+        grade = "B"
+    elif score >= 55:
+        grade = "C"
+    else:
+        grade = "D"
+
+    issues: list[str] = []
+    if breakdown["completeness"] < 18:
+        issues.append("High missingness reduces completeness")
+    if breakdown["uniqueness"] < 12:
+        issues.append("Elevated duplicate rate")
+    if breakdown["feature_validity"] < 10:
+        issues.append("Constant or ID-like features present")
+    if breakdown["outlier_health"] < 10:
+        issues.append("Many numeric outliers detected")
+    if breakdown["target_health"] < 14:
+        issues.append("Target column needs attention")
+    if breakdown["class_balance"] < 6:
+        issues.append("Class imbalance is material")
+
+    return {
+        "score": score,
+        "grade": grade,
+        "breakdown": breakdown,
+        "max_score": 100,
+        "issues": issues,
+        "rows": int(len(df)),
+        "columns": int(df.shape[1]),
     }
-
-    for name, model in [
-        ("Logistic Regression", LogisticRegression(max_iter=1000, random_state=42)),
-        ("Random Forest", RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)),
-    ]:
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        y_prob = model.predict_proba(X_test)[:, 1]
-
-        try:
-            cv_scores = cross_val_score(model, X, y, cv=n_splits, scoring="roc_auc")
-            cv_mean, cv_std = float(cv_scores.mean()), float(cv_scores.std())
-        except Exception:
-            cv_mean, cv_std = float("nan"), float("nan")
-
-        results["models"][name] = {
-            "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
-            "precision": round(float(precision_score(y_test, y_pred, zero_division=0)), 4),
-            "recall": round(float(recall_score(y_test, y_pred, zero_division=0)), 4),
-            "f1": round(float(f1_score(y_test, y_pred, zero_division=0)), 4),
-            "auc_roc": round(float(roc_auc_score(y_test, y_prob)), 4),
-            "cv_auc_mean": round(cv_mean, 4) if cv_mean == cv_mean else None,
-            "cv_auc_std": round(cv_std, 4) if cv_std == cv_std else None,
-        }
-
-    return results

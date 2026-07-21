@@ -24,6 +24,18 @@ class StudioSession:
     feature_selection_result: list[dict[str, Any]] = field(default_factory=list)
     validation_report: dict[str, Any] = field(default_factory=dict)
     model_validation: dict[str, Any] = field(default_factory=dict)
+    selected_algorithm: dict[str, Any] = field(default_factory=dict)
+    profile: dict[str, Any] = field(default_factory=dict)
+    quality_score: dict[str, Any] = field(default_factory=dict)
+    outlier_report: dict[str, Any] = field(default_factory=dict)
+    encoding_config: dict[str, Any] = field(default_factory=dict)
+    scaling_config: dict[str, Any] = field(default_factory=dict)
+    feature_eng_config: dict[str, Any] = field(default_factory=dict)
+    reduction_config: dict[str, Any] = field(default_factory=dict)
+    tuning_result: dict[str, Any] = field(default_factory=dict)
+    explanation: dict[str, Any] = field(default_factory=dict)
+    insights: dict[str, Any] = field(default_factory=dict)
+    report_html: str = ""
     filename: str = "dataset.csv"
 
     @property
