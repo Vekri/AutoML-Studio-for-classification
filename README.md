@@ -14,6 +14,18 @@ short_description: Free AutoML for binary classification — React + FastAPI
 
 **Free & open-source** · React + FastAPI
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Vekri/AutoML-Studio-for-classification)
+
+**Live Docker image:** `ghcr.io/vekri/automl-studio-for-classification:latest`
+
+## Deploy to Hugging Face (recommended)
+
+1. Create a write token at https://huggingface.co/settings/tokens  
+2. GitHub → **Settings → Secrets → Actions** → add `HF_TOKEN`  
+3. Push to `main` (auto-deploy) **or** **Actions → Deploy to Hugging Face Space → Run workflow**
+
+App URL: https://vekri-automl-studio-classification.hf.space
+
 ## Deploy free on Render (works)
 
 1. **[dashboard.render.com](https://dashboard.render.com)** → login with GitHub  

@@ -4,20 +4,26 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      hf_token:
+        description: Hugging Face write token (skip if HF_TOKEN secret is set)
+        required: false
+        type: string
 
 jobs:
   deploy:
+    if: ${{ secrets.HF_TOKEN != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.hf_token != '') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Deploy to Hugging Face (Docker Space)
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN != '' && secrets.HF_TOKEN || github.event.inputs.hf_token }}
         run: |
           if [ -z "$HF_TOKEN" ]; then
-            echo "HF_TOKEN not set — create Space manually at huggingface.co/new-space (Docker SDK)"
-            exit 0
+            echo "::error::HF_TOKEN is missing. Add repo secret HF_TOKEN or run workflow with hf_token input."
+            exit 1
           fi
           pip install huggingface_hub
           python << 'PYEOF'
@@ -42,7 +48,7 @@ jobs:
               repo_type="space",
               ignore_patterns=[
                   ".git/*", ".github/*", "__pycache__/*", ".pytest_cache/*",
-                  "*.pyc", "frontend/node_modules/*", "frontend/dist/*",
+                  "*.pyc", "frontend/node_modules/*",
                   ".venv/*", "venv/*",
               ],
               commit_message="Deploy React + FastAPI from GitHub Actions",
