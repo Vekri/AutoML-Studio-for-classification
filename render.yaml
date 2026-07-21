@@ -1,9 +1,9 @@
-# Native Python on Render free tier (no Docker build — more reliable)
-# Prebuilt React UI is in frontend/dist (committed to repo)
+# IntelliPredict — Render deployment (matches intellipredict-web.onrender.com pattern)
+# Prebuilt React UI in frontend/dist; FastAPI serves landing + studio SPA
 
 services:
   - type: web
-    name: automl-studio-classification
+    name: intellipredict-web
     runtime: python
     plan: free
     region: oregon
