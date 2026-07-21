@@ -10,39 +10,33 @@ license: mit
 short_description: Free AutoML for binary classification — React + FastAPI
 ---
 
-# AutoML Studio for Binary Classification
+# IntelliPredict AI — Binary Classification
 
-**Free & open-source** · React + FastAPI
+**Free & open-source** · React + FastAPI · Landing page + AutoML studio
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Vekri/AutoML-Studio-for-classification)
 
-**Live Docker image:** `ghcr.io/vekri/automl-studio-for-classification:latest`
+**Target URL:** https://intellipredict-web.onrender.com (Render service `intellipredict-web`)
 
-## Deploy to Hugging Face (recommended)
+## Routes
 
-1. Create a write token at https://huggingface.co/settings/tokens  
-2. GitHub → **Settings → Secrets → Actions** → add `HF_TOKEN`  
-3. Push to `main` (auto-deploy) **or** **Actions → Deploy to Hugging Face Space → Run workflow**
+| Path | Page |
+|------|------|
+| `/` | Marketing landing (like intellipredict-web.onrender.com) |
+| `/studio` | Full AutoML pipeline workspace |
+| `/dashboard` | Redirects to `/studio` |
 
-App URL: https://vekri-automl-studio-classification.hf.space
+## Deploy on Render
 
-## Deploy free on Render (works)
+1. **[dashboard.render.com](https://dashboard.render.com)** → **New +** → **Blueprint**
+2. Connect repo `Vekri/AutoML-Studio-for-classification` → **Apply**
+3. Uses `render.yaml` → service name `intellipredict-web`
+4. Open your `*.onrender.com` URL
 
-1. **[dashboard.render.com](https://dashboard.render.com)** → login with GitHub  
-2. **New +** → **Web Service** → repo `Vekri/AutoML-Studio-for-classification`  
-3. Settings:
+Or one-click: use the Deploy to Render button above.
 
-```
-Runtime:        Python 3
-Build Command:  pip install -r backend/requirements.txt
-Start Command:  uvicorn backend.main:app --host 0.0.0.0 --port $PORT
-Instance:       Free
-PYTHON_VERSION: 3.11.0
-```
-
-4. Deploy → open your `*.onrender.com` URL  
-
-Full steps: **[DEPLOY.md](DEPLOY.md)**
+Build command: `pip install -r backend/requirements.txt`  
+Start command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
 
 ## Local
 
